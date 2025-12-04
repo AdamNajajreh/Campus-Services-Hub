@@ -1,297 +1,244 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import mysql.connector
+import requests
 import os
-from datetime import datetime
 import logging
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+from functools import wraps
+import jwt
 
 app = Flask(__name__)
 CORS(app)
 
-# Database configuration
-db_config = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'user': os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', 'rootpassword'),
-    'database': os.getenv('DB_NAME', 'notification_db')
+# Service URLs
+SERVICES = {
+    'user': os.getenv('USER_SERVICE_URL', 'http://localhost:5001'),
+    'request': os.getenv('REQUEST_SERVICE_URL', 'http://localhost:5002'),
+    'booking': os.getenv('BOOKING_SERVICE_URL', 'http://localhost:5003'),
+    'notification': os.getenv('NOTIFICATION_SERVICE_URL', 'http://localhost:5004')
 }
 
-# Email configuration
-EMAIL_CONFIG = {
-    'host': os.getenv('EMAIL_HOST', 'smtp.gmail.com'),
-    'port': int(os.getenv('EMAIL_PORT', 587)),
-    'username': os.getenv('EMAIL_USER', ''),
-    'password': os.getenv('EMAIL_PASS', ''),
-    'from_email': os.getenv('FROM_EMAIL', 'noreply@campus.edu')
-}
+# Secret key for JWT verification
+SECRET_KEY = os.getenv('SECRET_KEY', 'campus-services-secret-key')
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def get_db_connection():
-    return mysql.connector.connect(**db_config)
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+        if 'Authorization' in request.headers:
+            token = request.headers['Authorization'].split(" ")[1]
+        
+        if not token:
+            return jsonify({'message': 'Token is missing!'}), 401
+        
+        try:
+            data = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+            request.current_user = data
+        except jwt.ExpiredSignatureError:
+            return jsonify({'message': 'Token has expired!'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'message': 'Invalid token!'}), 401
+        
+        return f(*args, **kwargs)
+    return decorated
 
-def send_email_notification(to_email, subject, message):
-    """Send email notification"""
+def forward_request(service_name, path, method='GET', data=None, headers=None):
+    """Forward request to appropriate service"""
     try:
-        if not EMAIL_CONFIG['username'] or not EMAIL_CONFIG['password']:
-            logger.warning("Email credentials not configured")
-            return False
+        service_url = SERVICES[service_name]
+        url = f"{service_url}{path}"
         
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_CONFIG['from_email']
-        msg['To'] = to_email
-        msg['Subject'] = subject
+        # Prepare headers
+        forward_headers = {}
+        if headers:
+            forward_headers.update(headers)
         
-        msg.attach(MIMEText(message, 'plain'))
+        # Remove host header to avoid issues
+        if 'Host' in forward_headers:
+            del forward_headers['Host']
         
-        server = smtplib.SMTP(EMAIL_CONFIG['host'], EMAIL_CONFIG['port'])
-        server.starttls()
-        server.login(EMAIL_CONFIG['username'], EMAIL_CONFIG['password'])
-        server.send_message(msg)
-        server.quit()
+        # Forward the request
+        if method == 'GET':
+            response = requests.get(url, headers=forward_headers, params=request.args)
+        elif method == 'POST':
+            response = requests.post(url, headers=forward_headers, json=data or request.get_json())
+        elif method == 'PUT':
+            response = requests.put(url, headers=forward_headers, json=data or request.get_json())
+        elif method == 'DELETE':
+            response = requests.delete(url, headers=forward_headers)
+        else:
+            return jsonify({'message': 'Method not allowed'}), 405
         
-        logger.info(f"Email sent to {to_email}")
-        return True
+        # Return the response from the service
+        return response.content, response.status_code, response.headers.items()
         
+    except requests.exceptions.ConnectionError:
+        logger.error(f"Cannot connect to {service_name} service")
+        return jsonify({'message': f'{service_name} service unavailable'}), 503
     except Exception as e:
-        logger.error(f"Failed to send email: {str(e)}")
-        return False
+        logger.error(f"Error forwarding to {service_name}: {str(e)}")
+        return jsonify({'message': 'Internal server error'}), 500
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    return jsonify({'status': 'healthy', 'service': 'notification-service'}), 200
+    # Check health of all services
+    health_status = {}
+    for service_name, url in SERVICES.items():
+        try:
+            response = requests.get(f"{url}/health", timeout=2)
+            health_status[service_name] = response.status_code == 200
+        except:
+            health_status[service_name] = False
+    
+    all_healthy = all(health_status.values())
+    return jsonify({
+        'status': 'healthy' if all_healthy else 'degraded',
+        'services': health_status
+    }), 200 if all_healthy else 503
 
-@app.route('/notifications', methods=['POST'])
-def create_notification():
-    try:
-        data = request.get_json()
-        user_id = data.get('user_id')
-        message = data.get('message')
-        notification_type = data.get('type', 'general')
-        priority = data.get('priority', 'medium')
-        
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
-        
-        # Get user email from user service (in production, use service call)
-        # For now, we'll store notification without email
-        cursor.execute("""
-            INSERT INTO notifications (user_id, message, type, priority, status)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (user_id, message, notification_type, priority, 'pending'))
-        
-        notification_id = cursor.lastrowid
-        
-        # Try to send email if user email is provided
-        user_email = data.get('user_email')
-        if user_email and notification_type in ['urgent', 'booking_confirmed', 'request_updated']:
-            subject = f"Campus Services: {notification_type.replace('_', ' ').title()}"
-            email_sent = send_email_notification(user_email, subject, message)
-            
-            if email_sent:
-                cursor.execute("UPDATE notifications SET status = 'sent' WHERE id = %s", (notification_id,))
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        logger.info(f"Notification created: {notification_id}")
-        return jsonify({
-            'message': 'Notification created successfully',
-            'notification_id': notification_id
-        }), 201
-        
-    except Exception as e:
-        logger.error(f"Create notification error: {str(e)}")
-        return jsonify({'message': 'Failed to create notification', 'error': str(e)}), 500
+# Auth routes
+@app.route('/api/auth/register', methods=['POST'])
+def register():
+    return forward_request('user', '/register', 'POST')
 
-@app.route('/notifications/user/<int:user_id>', methods=['GET'])
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    return forward_request('user', '/login', 'POST')
+
+# User routes
+@app.route('/api/users/<int:user_id>', methods=['GET'])
+@token_required
+def get_user(user_id):
+    return forward_request('user', f'/users/{user_id}', 'GET')
+
+@app.route('/api/users/<int:user_id>', methods=['PUT'])
+@token_required
+def update_user(user_id):
+    return forward_request('user', f'/users/{user_id}', 'PUT')
+
+# Request routes
+@app.route('/api/requests', methods=['GET'])
+@token_required
+def get_requests():
+    return forward_request('request', '/requests', 'GET')
+
+@app.route('/api/requests', methods=['POST'])
+@token_required
+def create_request():
+    return forward_request('request', '/requests', 'POST')
+
+@app.route('/api/requests/<int:request_id>', methods=['GET'])
+@token_required
+def get_request(request_id):
+    return forward_request('request', f'/requests/{request_id}', 'GET')
+
+@app.route('/api/requests/<int:request_id>/status', methods=['PUT'])
+@token_required
+def update_request_status(request_id):
+    return forward_request('request', f'/requests/{request_id}/status', 'PUT')
+
+# Booking routes
+@app.route('/api/rooms', methods=['GET'])
+def get_rooms():
+    return forward_request('booking', '/rooms', 'GET')
+
+@app.route('/api/rooms/<int:room_id>/availability', methods=['GET'])
+def check_availability(room_id):
+    return forward_request('booking', f'/rooms/{room_id}/availability', 'GET')
+
+@app.route('/api/bookings', methods=['GET'])
+@token_required
+def get_bookings():
+    return forward_request('booking', '/bookings', 'GET')
+
+@app.route('/api/bookings', methods=['POST'])
+@token_required
+def create_booking():
+    return forward_request('booking', '/bookings', 'POST')
+
+@app.route('/api/bookings/<int:booking_id>', methods=['DELETE'])
+@token_required
+def cancel_booking(booking_id):
+    return forward_request('booking', f'/bookings/{booking_id}', 'DELETE')
+
+# Notification routes
+@app.route('/api/notifications/user/<int:user_id>', methods=['GET'])
+@token_required
 def get_user_notifications(user_id):
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
-        
-        cursor.execute("""
-            SELECT * FROM notifications 
-            WHERE user_id = %s 
-            ORDER BY created_at DESC
-            LIMIT 50
-        """, (user_id,))
-        
-        notifications = cursor.fetchall()
-        
-        cursor.close()
-        conn.close()
-        
-        return jsonify(notifications), 200
-        
-    except Exception as e:
-        logger.error(f"Get notifications error: {str(e)}")
-        return jsonify({'message': 'Failed to get notifications', 'error': str(e)}), 500
+    return forward_request('notification', f'/notifications/user/{user_id}', 'GET')
 
-@app.route('/notifications/<int:notification_id>/read', methods=['PUT'])
+@app.route('/api/notifications/<int:notification_id>/read', methods=['PUT'])
+@token_required
 def mark_as_read(notification_id):
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            UPDATE notifications 
-            SET is_read = TRUE, read_at = %s 
-            WHERE id = %s
-        """, (datetime.now(), notification_id))
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return jsonify({'message': 'Notification marked as read'}), 200
-        
-    except Exception as e:
-        logger.error(f"Mark as read error: {str(e)}")
-        return jsonify({'message': 'Failed to mark notification as read', 'error': str(e)}), 500
+    return forward_request('notification', f'/notifications/{notification_id}/read', 'PUT')
 
-@app.route('/notifications/unread/count/<int:user_id>', methods=['GET'])
+@app.route('/api/notifications/unread/count/<int:user_id>', methods=['GET'])
+@token_required
 def get_unread_count(user_id):
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT COUNT(*) FROM notifications WHERE user_id = %s AND is_read = FALSE", (user_id,))
-        count = cursor.fetchone()[0]
-        
-        cursor.close()
-        conn.close()
-        
-        return jsonify({'unread_count': count}), 200
-        
-    except Exception as e:
-        logger.error(f"Get unread count error: {str(e)}")
-        return jsonify({'message': 'Failed to get unread count', 'error': str(e)}), 500
+    return forward_request('notification', f'/notifications/unread/count/{user_id}', 'GET')
 
-@app.route('/announcements', methods=['POST'])
-def create_announcement():
-    try:
-        data = request.get_json()
-        title = data.get('title')
-        content = data.get('content')
-        target_audience = data.get('target_audience', 'all')  # all, students, staff
-        
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
-        
-        cursor.execute("""
-            INSERT INTO announcements (title, content, target_audience)
-            VALUES (%s, %s, %s)
-        """, (title, content, target_audience))
-        
-        announcement_id = cursor.lastrowid
-        conn.commit()
-        
-        # In production, this would trigger notifications to all users
-        # For now, we just store the announcement
-        
-        cursor.close()
-        conn.close()
-        
-        logger.info(f"Announcement created: {announcement_id}")
-        return jsonify({
-            'message': 'Announcement created successfully',
-            'announcement_id': announcement_id
-        }), 201
-        
-    except Exception as e:
-        logger.error(f"Create announcement error: {str(e)}")
-        return jsonify({'message': 'Failed to create announcement', 'error': str(e)}), 500
-
-@app.route('/announcements', methods=['GET'])
+@app.route('/api/announcements', methods=['GET'])
 def get_announcements():
+    return forward_request('notification', '/announcements', 'GET')
+
+@app.route('/api/announcements', methods=['POST'])
+@token_required
+def create_announcement():
+    return forward_request('notification', '/announcements', 'POST')
+
+# Aggregate endpoints for dashboard
+@app.route('/api/dashboard/<int:user_id>', methods=['GET'])
+@token_required
+def get_dashboard(user_id):
+    """Aggregate data for user dashboard"""
     try:
-        audience = request.args.get('audience', 'all')
+        # Get user info
+        user_response = requests.get(f"{SERVICES['user']}/users/{user_id}", 
+                                   headers=request.headers)
+        user_data = user_response.json() if user_response.status_code == 200 else {}
         
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        # Get user's requests
+        requests_response = requests.get(f"{SERVICES['request']}/requests?user_id={user_id}",
+                                       headers=request.headers)
+        requests_data = requests_response.json() if requests_response.status_code == 200 else []
         
-        if audience == 'all':
-            cursor.execute("SELECT * FROM announcements ORDER BY created_at DESC LIMIT 20")
-        else:
-            cursor.execute("""
-                SELECT * FROM announcements 
-                WHERE target_audience IN (%s, 'all')
-                ORDER BY created_at DESC 
-                LIMIT 20
-            """, (audience,))
+        # Get user's bookings
+        bookings_response = requests.get(f"{SERVICES['booking']}/bookings",
+                                       headers=request.headers)
+        bookings_data = bookings_response.json() if bookings_response.status_code == 200 else []
         
-        announcements = cursor.fetchall()
+        # Get user's notifications
+        notifications_response = requests.get(f"{SERVICES['notification']}/notifications/user/{user_id}",
+                                           headers=request.headers)
+        notifications_data = notifications_response.json() if notifications_response.status_code == 200 else []
         
-        cursor.close()
-        conn.close()
+        # Get announcements
+        announcements_response = requests.get(f"{SERVICES['notification']}/announcements?audience=all")
+        announcements_data = announcements_response.json() if announcements_response.status_code == 200 else []
         
-        return jsonify(announcements), 200
+        return jsonify({
+            'user': user_data,
+            'requests': requests_data[:5],  # Last 5 requests
+            'bookings': bookings_data[:5],  # Last 5 bookings
+            'notifications': notifications_data[:10],  # Last 10 notifications
+            'announcements': announcements_data[:5]  # Last 5 announcements
+        }), 200
         
     except Exception as e:
-        logger.error(f"Get announcements error: {str(e)}")
-        return jsonify({'message': 'Failed to get announcements', 'error': str(e)}), 500
+        logger.error(f"Dashboard error: {str(e)}")
+        return jsonify({'message': 'Failed to load dashboard'}), 500
+
+# Error handlers
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'message': 'Endpoint not found'}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({'message': 'Internal server error'}), 500
 
 if __name__ == '__main__':
-    # Initialize database
-    conn = mysql.connector.connect(
-        host=db_config['host'],
-        user=db_config['user'],
-        password=db_config['password']
-    )
-    cursor = conn.cursor()
-    
-    cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_config['database']}")
-    cursor.close()
-    conn.close()
-    
-    # Create tables
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS notifications (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            user_id INT NOT NULL,
-            message TEXT NOT NULL,
-            type VARCHAR(50),
-            priority ENUM('low', 'medium', 'high') DEFAULT 'medium',
-            status ENUM('pending', 'sent', 'failed') DEFAULT 'pending',
-            is_read BOOLEAN DEFAULT FALSE,
-            read_at TIMESTAMP NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS announcements (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            title VARCHAR(255) NOT NULL,
-            content TEXT NOT NULL,
-            target_audience ENUM('all', 'students', 'staff') DEFAULT 'all',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    # Insert sample announcements
-    cursor.execute("SELECT COUNT(*) FROM announcements")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute("""
-            INSERT INTO announcements (title, content, target_audience) VALUES
-            ('Welcome to Campus Services Hub', 'The new campus services platform is now live! Submit maintenance requests and book rooms easily.', 'all'),
-            ('Library Renovation', 'Main library will be closed for renovation from next Monday. Alternative study spaces available.', 'students'),
-            ('Staff Meeting', 'Monthly staff meeting scheduled for Friday at 2 PM in Conference Room.', 'staff'),
-            ('COVID-19 Guidelines Update', 'Please review the updated campus health and safety guidelines on the portal.', 'all')
-        """)
-    
-    conn.commit()
-    cursor.close()
-    conn.close()
-    
-    app.run(host='0.0.0.0', port=5004, debug=True)
+    app.run(host='0.0.0.0', port=5005, debug=True)
