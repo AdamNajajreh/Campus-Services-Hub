@@ -1,244 +1,608 @@
-from flask import Flask, request, jsonify
+"""
+API Gateway for Campus Services Hub
+Routes requests to appropriate microservices
+"""
+
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import requests
-import os
-import logging
-from functools import wraps
 import jwt
+import os
+import time
+import logging
+from datetime import datetime
+from functools import wraps
+from config import Config
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={
+    r"/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
+app.config.from_object(Config)
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Create a session with retry logic
+def create_session():
+    """Create requests session with retry logic"""
+    session = requests.Session()
+    retry = Retry(
+        total=3,
+        backoff_factor=0.3,
+        status_forcelist=[500, 502, 503, 504]
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    return session
+
+session = create_session()
 
 # Service URLs
 SERVICES = {
-    'user': os.getenv('USER_SERVICE_URL', 'http://localhost:5001'),
-    'request': os.getenv('REQUEST_SERVICE_URL', 'http://localhost:5002'),
-    'booking': os.getenv('BOOKING_SERVICE_URL', 'http://localhost:5003'),
-    'notification': os.getenv('NOTIFICATION_SERVICE_URL', 'http://localhost:5004')
+    'user': app.config['USER_SERVICE_URL'],
+    'request': app.config['REQUEST_SERVICE_URL'],
+    'booking': app.config['BOOKING_SERVICE_URL'],
+    'notification': app.config['NOTIFICATION_SERVICE_URL']
 }
 
-# Secret key for JWT verification
-SECRET_KEY = os.getenv('SECRET_KEY', 'campus-services-secret-key')
+# Rate limiting (simple in-memory implementation)
+request_counts = {}
+RATE_LIMIT = 100  # requests per minute
+RATE_WINDOW = 60  # seconds
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+def check_rate_limit(client_id):
+    """Simple rate limiting check"""
+    current_time = time.time()
+    
+    if client_id not in request_counts:
+        request_counts[client_id] = []
+    
+    # Remove old requests outside the window
+    request_counts[client_id] = [
+        req_time for req_time in request_counts[client_id]
+        if current_time - req_time < RATE_WINDOW
+    ]
+    
+    # Check if limit exceeded
+    if len(request_counts[client_id]) >= RATE_LIMIT:
+        return False
+    
+    # Add current request
+    request_counts[client_id].append(current_time)
+    return True
 
-def token_required(f):
+def rate_limit_middleware(f):
+    """Rate limiting decorator"""
     @wraps(f)
     def decorated(*args, **kwargs):
-        token = None
-        if 'Authorization' in request.headers:
-            token = request.headers['Authorization'].split(" ")[1]
+        # Use IP address as client identifier
+        client_id = request.remote_addr
         
-        if not token:
-            return jsonify({'message': 'Token is missing!'}), 401
-        
-        try:
-            data = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
-            request.current_user = data
-        except jwt.ExpiredSignatureError:
-            return jsonify({'message': 'Token has expired!'}), 401
-        except jwt.InvalidTokenError:
-            return jsonify({'message': 'Invalid token!'}), 401
+        if not check_rate_limit(client_id):
+            return jsonify({
+                'success': False,
+                'message': 'Rate limit exceeded. Please try again later.'
+            }), 429
         
         return f(*args, **kwargs)
     return decorated
 
-def forward_request(service_name, path, method='GET', data=None, headers=None):
-    """Forward request to appropriate service"""
+def extract_token():
+    """Extract JWT token from request headers"""
+    auth_header = request.headers.get('Authorization')
+    if auth_header and auth_header.startswith('Bearer '):
+        return auth_header.split(' ')[1]
+    return None
+
+def validate_token(token):
+    """Validate JWT token"""
     try:
-        service_url = SERVICES[service_name]
+        decoded = jwt.decode(
+            token,
+            app.config['SECRET_KEY'],
+            algorithms=["HS256"]
+        )
+        return True, decoded
+    except jwt.ExpiredSignatureError:
+        return False, "Token has expired"
+    except jwt.InvalidTokenError:
+        return False, "Invalid token"
+    except Exception as e:
+        return False, str(e)
+
+def forward_request(service_url, path='', method='GET', **kwargs):
+    """
+    Forward request to a microservice
+    
+    Args:
+        service_url: Base URL of the service
+        path: Additional path to append
+        method: HTTP method
+        **kwargs: Additional arguments for requests
+    """
+    try:
         url = f"{service_url}{path}"
         
-        # Prepare headers
-        forward_headers = {}
-        if headers:
-            forward_headers.update(headers)
+        # Forward headers (except Host)
+        headers = {
+            key: value for key, value in request.headers.items()
+            if key.lower() not in ['host', 'content-length']
+        }
         
-        # Remove host header to avoid issues
-        if 'Host' in forward_headers:
-            del forward_headers['Host']
+        # Add timeout
+        kwargs.setdefault('timeout', 30)
+        kwargs['headers'] = headers
         
-        # Forward the request
-        if method == 'GET':
-            response = requests.get(url, headers=forward_headers, params=request.args)
-        elif method == 'POST':
-            response = requests.post(url, headers=forward_headers, json=data or request.get_json())
-        elif method == 'PUT':
-            response = requests.put(url, headers=forward_headers, json=data or request.get_json())
-        elif method == 'DELETE':
-            response = requests.delete(url, headers=forward_headers)
-        else:
-            return jsonify({'message': 'Method not allowed'}), 405
+        # Make request
+        response = session.request(method, url, **kwargs)
         
-        # Return the response from the service
-        return response.content, response.status_code, response.headers.items()
+        # Create response
+        excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+        response_headers = [
+            (name, value) for name, value in response.raw.headers.items()
+            if name.lower() not in excluded_headers
+        ]
         
+        return Response(
+            response.content,
+            response.status_code,
+            response_headers
+        )
+        
+    except requests.exceptions.Timeout:
+        logger.error(f"Request timeout to {service_url}{path}")
+        return jsonify({
+            'success': False,
+            'message': 'Service request timed out'
+        }), 504
     except requests.exceptions.ConnectionError:
-        logger.error(f"Cannot connect to {service_name} service")
-        return jsonify({'message': f'{service_name} service unavailable'}), 503
+        logger.error(f"Connection error to {service_url}{path}")
+        return jsonify({
+            'success': False,
+            'message': 'Service unavailable'
+        }), 503
     except Exception as e:
-        logger.error(f"Error forwarding to {service_name}: {str(e)}")
-        return jsonify({'message': 'Internal server error'}), 500
+        logger.error(f"Error forwarding request: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'Gateway error',
+            'error': str(e)
+        }), 500
+
+# ============================
+# HEALTH & STATUS
+# ============================
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    # Check health of all services
-    health_status = {}
-    for service_name, url in SERVICES.items():
-        try:
-            response = requests.get(f"{url}/health", timeout=2)
-            health_status[service_name] = response.status_code == 200
-        except:
-            health_status[service_name] = False
-    
-    all_healthy = all(health_status.values())
+    """Gateway health check"""
     return jsonify({
-        'status': 'healthy' if all_healthy else 'degraded',
-        'services': health_status
+        'status': 'healthy',
+        'service': 'api-gateway',
+        'timestamp': datetime.now().isoformat(),
+        'version': '1.0.0'
+    }), 200
+
+@app.route('/services/health', methods=['GET'])
+@rate_limit_middleware
+def check_all_services():
+    """Check health of all services"""
+    service_status = {}
+    
+    for service_name, service_url in SERVICES.items():
+        try:
+            response = session.get(f"{service_url}/health", timeout=5)
+            service_status[service_name] = {
+                'status': 'healthy' if response.status_code == 200 else 'unhealthy',
+                'response_time': response.elapsed.total_seconds(),
+                'status_code': response.status_code
+            }
+        except Exception as e:
+            service_status[service_name] = {
+                'status': 'unreachable',
+                'error': str(e)
+            }
+    
+    all_healthy = all(s['status'] == 'healthy' for s in service_status.values())
+    
+    return jsonify({
+        'success': True,
+        'gateway': 'healthy',
+        'services': service_status,
+        'overall': 'healthy' if all_healthy else 'degraded'
     }), 200 if all_healthy else 503
 
-# Auth routes
+# ============================
+# AUTHENTICATION ROUTES
+# ============================
+
 @app.route('/api/auth/register', methods=['POST'])
+@rate_limit_middleware
 def register():
-    return forward_request('user', '/register', 'POST')
+    """Register new user"""
+    return forward_request(
+        SERVICES['user'],
+        '/register',
+        method='POST',
+        json=request.get_json()
+    )
 
 @app.route('/api/auth/login', methods=['POST'])
+@rate_limit_middleware
 def login():
-    return forward_request('user', '/login', 'POST')
+    """User login"""
+    return forward_request(
+        SERVICES['user'],
+        '/login',
+        method='POST',
+        json=request.get_json()
+    )
 
-# User routes
+@app.route('/api/auth/validate-token', methods=['POST'])
+@rate_limit_middleware
+def validate_token_route():
+    """Validate JWT token"""
+    return forward_request(
+        SERVICES['user'],
+        '/validate-token',
+        method='POST',
+        json=request.get_json()
+    )
+
+# ============================
+# USER ROUTES
+# ============================
+
+@app.route('/api/users/me', methods=['GET'])
+@rate_limit_middleware
+def get_current_user():
+    """Get current user profile"""
+    return forward_request(SERVICES['user'], '/users/me', method='GET')
+
+@app.route('/api/users/me', methods=['PUT'])
+@rate_limit_middleware
+def update_current_user():
+    """Update current user profile"""
+    return forward_request(
+        SERVICES['user'],
+        '/users/me',
+        method='PUT',
+        json=request.get_json()
+    )
+
+@app.route('/api/users/me/password', methods=['PUT'])
+@rate_limit_middleware
+def change_password():
+    """Change user password"""
+    return forward_request(
+        SERVICES['user'],
+        '/users/me/password',
+        method='PUT',
+        json=request.get_json()
+    )
+
 @app.route('/api/users/<int:user_id>', methods=['GET'])
-@token_required
+@rate_limit_middleware
 def get_user(user_id):
-    return forward_request('user', f'/users/{user_id}', 'GET')
+    """Get user by ID"""
+    return forward_request(SERVICES['user'], f'/users/{user_id}', method='GET')
 
-@app.route('/api/users/<int:user_id>', methods=['PUT'])
-@token_required
-def update_user(user_id):
-    return forward_request('user', f'/users/{user_id}', 'PUT')
+@app.route('/api/users', methods=['GET'])
+@rate_limit_middleware
+def get_all_users():
+    """Get all users (admin/staff only)"""
+    return forward_request(SERVICES['user'], '/users', method='GET')
 
-# Request routes
-@app.route('/api/requests', methods=['GET'])
-@token_required
-def get_requests():
-    return forward_request('request', '/requests', 'GET')
+@app.route('/api/users/<int:user_id>/role', methods=['PUT'])
+@rate_limit_middleware
+def update_user_role(user_id):
+    """Update user role (admin only)"""
+    return forward_request(
+        SERVICES['user'],
+        f'/users/{user_id}/role',
+        method='PUT',
+        json=request.get_json()
+    )
+
+@app.route('/api/users/<int:user_id>', methods=['DELETE'])
+@rate_limit_middleware
+def delete_user(user_id):
+    """Delete user (admin only)"""
+    return forward_request(SERVICES['user'], f'/users/{user_id}', method='DELETE')
+
+# ============================
+# REQUEST SERVICE ROUTES
+# ============================
 
 @app.route('/api/requests', methods=['POST'])
-@token_required
+@rate_limit_middleware
 def create_request():
-    return forward_request('request', '/requests', 'POST')
+    """Create new service request"""
+    return forward_request(
+        SERVICES['request'],
+        '/requests',
+        method='POST',
+        json=request.get_json()
+    )
+
+@app.route('/api/requests', methods=['GET'])
+@rate_limit_middleware
+def get_requests():
+    """Get service requests"""
+    return forward_request(SERVICES['request'], '/requests', method='GET')
 
 @app.route('/api/requests/<int:request_id>', methods=['GET'])
-@token_required
+@rate_limit_middleware
 def get_request(request_id):
-    return forward_request('request', f'/requests/{request_id}', 'GET')
+    """Get specific request"""
+    return forward_request(SERVICES['request'], f'/requests/{request_id}', method='GET')
+
+@app.route('/api/requests/<int:request_id>', methods=['PUT'])
+@rate_limit_middleware
+def update_request(request_id):
+    """Update request"""
+    return forward_request(
+        SERVICES['request'],
+        f'/requests/{request_id}',
+        method='PUT',
+        json=request.get_json()
+    )
+
+@app.route('/api/requests/<int:request_id>', methods=['DELETE'])
+@rate_limit_middleware
+def delete_request(request_id):
+    """Delete request"""
+    return forward_request(SERVICES['request'], f'/requests/{request_id}', method='DELETE')
 
 @app.route('/api/requests/<int:request_id>/status', methods=['PUT'])
-@token_required
+@rate_limit_middleware
 def update_request_status(request_id):
-    return forward_request('request', f'/requests/{request_id}/status', 'PUT')
+    """Update request status"""
+    return forward_request(
+        SERVICES['request'],
+        f'/requests/{request_id}/status',
+        method='PUT',
+        json=request.get_json()
+    )
 
-# Booking routes
+@app.route('/api/requests/<int:request_id>/priority', methods=['PUT'])
+@rate_limit_middleware
+def update_request_priority(request_id):
+    """Update request priority"""
+    return forward_request(
+        SERVICES['request'],
+        f'/requests/{request_id}/priority',
+        method='PUT',
+        json=request.get_json()
+    )
+
+@app.route('/api/requests/<int:request_id>/assign', methods=['PUT'])
+@rate_limit_middleware
+def assign_request(request_id):
+    """Assign request to staff"""
+    return forward_request(
+        SERVICES['request'],
+        f'/requests/{request_id}/assign',
+        method='PUT',
+        json=request.get_json()
+    )
+
+@app.route('/api/requests/stats', methods=['GET'])
+@rate_limit_middleware
+def get_request_statistics():
+    """Get request statistics"""
+    return forward_request(SERVICES['request'], '/requests/stats', method='GET')
+
+# ============================
+# BOOKING SERVICE ROUTES
+# ============================
+
 @app.route('/api/rooms', methods=['GET'])
+@rate_limit_middleware
 def get_rooms():
-    return forward_request('booking', '/rooms', 'GET')
+    """Get available rooms"""
+    return forward_request(SERVICES['booking'], '/rooms', method='GET')
 
 @app.route('/api/rooms/<int:room_id>/availability', methods=['GET'])
+@rate_limit_middleware
 def check_availability(room_id):
-    return forward_request('booking', f'/rooms/{room_id}/availability', 'GET')
-
-@app.route('/api/bookings', methods=['GET'])
-@token_required
-def get_bookings():
-    return forward_request('booking', '/bookings', 'GET')
+    """Check room availability"""
+    return forward_request(SERVICES['booking'], f'/rooms/{room_id}/availability', method='GET')
 
 @app.route('/api/bookings', methods=['POST'])
-@token_required
+@rate_limit_middleware
 def create_booking():
-    return forward_request('booking', '/bookings', 'POST')
+    """Create new booking"""
+    return forward_request(
+        SERVICES['booking'],
+        '/bookings',
+        method='POST',
+        json=request.get_json()
+    )
+
+@app.route('/api/bookings', methods=['GET'])
+@rate_limit_middleware
+def get_bookings():
+    """Get bookings"""
+    return forward_request(SERVICES['booking'], '/bookings', method='GET')
 
 @app.route('/api/bookings/<int:booking_id>', methods=['DELETE'])
-@token_required
+@rate_limit_middleware
 def cancel_booking(booking_id):
-    return forward_request('booking', f'/bookings/{booking_id}', 'DELETE')
+    """Cancel booking"""
+    return forward_request(SERVICES['booking'], f'/bookings/{booking_id}', method='DELETE')
 
-# Notification routes
+# ============================
+# NOTIFICATION SERVICE ROUTES
+# ============================
+
+@app.route('/api/notifications', methods=['POST'])
+@rate_limit_middleware
+def create_notification():
+    """Create notification (internal use)"""
+    return forward_request(
+        SERVICES['notification'],
+        '/notifications',
+        method='POST',
+        json=request.get_json()
+    )
+
 @app.route('/api/notifications/user/<int:user_id>', methods=['GET'])
-@token_required
+@rate_limit_middleware
 def get_user_notifications(user_id):
-    return forward_request('notification', f'/notifications/user/{user_id}', 'GET')
+    """Get user notifications"""
+    return forward_request(SERVICES['notification'], f'/notifications/user/{user_id}', method='GET')
 
 @app.route('/api/notifications/<int:notification_id>/read', methods=['PUT'])
-@token_required
+@rate_limit_middleware
 def mark_as_read(notification_id):
-    return forward_request('notification', f'/notifications/{notification_id}/read', 'PUT')
+    """Mark notification as read"""
+    return forward_request(
+        SERVICES['notification'],
+        f'/notifications/{notification_id}/read',
+        method='PUT'
+    )
 
 @app.route('/api/notifications/unread/count/<int:user_id>', methods=['GET'])
-@token_required
+@rate_limit_middleware
 def get_unread_count(user_id):
-    return forward_request('notification', f'/notifications/unread/count/{user_id}', 'GET')
+    """Get unread notification count"""
+    return forward_request(
+        SERVICES['notification'],
+        f'/notifications/unread/count/{user_id}',
+        method='GET'
+    )
 
-@app.route('/api/announcements', methods=['GET'])
-def get_announcements():
-    return forward_request('notification', '/announcements', 'GET')
+@app.route('/api/notifications/mark-all-read', methods=['PUT'])
+@rate_limit_middleware
+def mark_all_as_read():
+    """Mark all notifications as read"""
+    return forward_request(
+        SERVICES['notification'],
+        '/notifications/mark-all-read',
+        method='PUT'
+    )
+
+# ============================
+# ANNOUNCEMENT ROUTES
+# ============================
 
 @app.route('/api/announcements', methods=['POST'])
-@token_required
+@rate_limit_middleware
 def create_announcement():
-    return forward_request('notification', '/announcements', 'POST')
+    """Create announcement"""
+    return forward_request(
+        SERVICES['notification'],
+        '/announcements',
+        method='POST',
+        json=request.get_json()
+    )
 
-# Aggregate endpoints for dashboard
-@app.route('/api/dashboard/<int:user_id>', methods=['GET'])
-@token_required
-def get_dashboard(user_id):
-    """Aggregate data for user dashboard"""
-    try:
-        # Get user info
-        user_response = requests.get(f"{SERVICES['user']}/users/{user_id}", 
-                                   headers=request.headers)
-        user_data = user_response.json() if user_response.status_code == 200 else {}
-        
-        # Get user's requests
-        requests_response = requests.get(f"{SERVICES['request']}/requests?user_id={user_id}",
-                                       headers=request.headers)
-        requests_data = requests_response.json() if requests_response.status_code == 200 else []
-        
-        # Get user's bookings
-        bookings_response = requests.get(f"{SERVICES['booking']}/bookings",
-                                       headers=request.headers)
-        bookings_data = bookings_response.json() if bookings_response.status_code == 200 else []
-        
-        # Get user's notifications
-        notifications_response = requests.get(f"{SERVICES['notification']}/notifications/user/{user_id}",
-                                           headers=request.headers)
-        notifications_data = notifications_response.json() if notifications_response.status_code == 200 else []
-        
-        # Get announcements
-        announcements_response = requests.get(f"{SERVICES['notification']}/announcements?audience=all")
-        announcements_data = announcements_response.json() if announcements_response.status_code == 200 else []
-        
-        return jsonify({
-            'user': user_data,
-            'requests': requests_data[:5],  # Last 5 requests
-            'bookings': bookings_data[:5],  # Last 5 bookings
-            'notifications': notifications_data[:10],  # Last 10 notifications
-            'announcements': announcements_data[:5]  # Last 5 announcements
-        }), 200
-        
-    except Exception as e:
-        logger.error(f"Dashboard error: {str(e)}")
-        return jsonify({'message': 'Failed to load dashboard'}), 500
+@app.route('/api/announcements', methods=['GET'])
+@rate_limit_middleware
+def get_announcements():
+    """Get announcements"""
+    return forward_request(SERVICES['notification'], '/announcements', method='GET')
 
-# Error handlers
+@app.route('/api/announcements/<int:announcement_id>', methods=['GET'])
+@rate_limit_middleware
+def get_announcement(announcement_id):
+    """Get specific announcement"""
+    return forward_request(
+        SERVICES['notification'],
+        f'/announcements/{announcement_id}',
+        method='GET'
+    )
+
+@app.route('/api/announcements/recent', methods=['GET'])
+@rate_limit_middleware
+def get_recent_announcements():
+    """Get recent announcements"""
+    return forward_request(SERVICES['notification'], '/announcements/recent', method='GET')
+
+@app.route('/api/notifications/stats', methods=['GET'])
+@rate_limit_middleware
+def get_notification_statistics():
+    """Get notification statistics"""
+    return forward_request(SERVICES['notification'], '/notifications/stats', method='GET')
+
+# ============================
+# ERROR HANDLERS
+# ============================
+
 @app.errorhandler(404)
 def not_found(error):
-    return jsonify({'message': 'Endpoint not found'}), 404
+    """Handle 404 errors"""
+    return jsonify({
+        'success': False,
+        'message': 'Endpoint not found'
+    }), 404
+
+@app.errorhandler(405)
+def method_not_allowed(error):
+    """Handle 405 errors"""
+    return jsonify({
+        'success': False,
+        'message': 'Method not allowed'
+    }), 405
 
 @app.errorhandler(500)
 def internal_error(error):
-    return jsonify({'message': 'Internal server error'}), 500
+    """Handle 500 errors"""
+    return jsonify({
+        'success': False,
+        'message': 'Internal server error'
+    }), 500
+
+@app.errorhandler(503)
+def service_unavailable(error):
+    """Handle 503 errors"""
+    return jsonify({
+        'success': False,
+        'message': 'Service temporarily unavailable'
+    }), 503
+
+# Security headers middleware
+@app.after_request
+def add_security_headers(response):
+    """Add security headers to all responses"""
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
+
+# ============================
+# APPLICATION STARTUP
+# ============================
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5005, debug=True)
+    try:
+        logger.info("Starting API Gateway...")
+        logger.info(f"User Service: {SERVICES['user']}")
+        logger.info(f"Request Service: {SERVICES['request']}")
+        logger.info(f"Booking Service: {SERVICES['booking']}")
+        logger.info(f"Notification Service: {SERVICES['notification']}")
+        
+        app.run(
+            host='0.0.0.0',
+            port=app.config['PORT'],
+            debug=app.config['DEBUG'],
+            threaded=True
+        )
+    except KeyboardInterrupt:
+        logger.info("API Gateway stopped by user")
+    except Exception as e:
+        logger.error(f"Failed to start API Gateway: {str(e)}")
