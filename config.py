@@ -5,7 +5,7 @@ load_dotenv()
 
 class Config:
     # Use DB_ prefix to match app.py
-    DB_HOST = os.getenv("DB_HOST", "localhost")
+    DB_HOST = os.getenv("DB_HOST", "172.17.0.1")
     DB_USER = os.getenv("DB_USER", "root")
     DB_PASSWORD = os.getenv("DB_PASSWORD", "")
     DB_NAME = os.getenv("DB_NAME", "booking_db")
