@@ -12,4 +12,4 @@ class Config:
     
     SECRET_KEY = os.getenv("SECRET_KEY", "campus-services-secret-key")
     JWT_EXPIRATION_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))
-    USER_SERVICE_URL = os.getenv("USER_SERVICE_URL", "http://user-service:5000")
+    USER_SERVICE_URL = os.getenv("USER_SERVICE_URL", "http://localhost:5001")
