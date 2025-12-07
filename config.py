@@ -12,7 +12,7 @@ class Config:
     """Application configuration"""
     
     # MySQL Configuration
-    MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
+    MYSQL_HOST = os.getenv("MYSQL_HOST", "172.17.0.1")
     MYSQL_USER = os.getenv("MYSQL_USER", "root")
     MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
     MYSQL_DB = os.getenv("MYSQL_DB", "notification_db")
