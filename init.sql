@@ -47,3 +47,4 @@ BEGIN
         ('Auditorium', 'auditorium', 200, 'Main Building - Ground Floor', 'Stage, Sound System, Projector');
     END IF;
 END $$;
+

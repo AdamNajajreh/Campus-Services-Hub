@@ -80,3 +80,4 @@ python app.py
 - `POST /bookings` - Create a booking (requires authentication)
 - `GET /bookings` - Get bookings (filtered by user role)
 - `DELETE /bookings/<id>` - Cancel a booking
+
