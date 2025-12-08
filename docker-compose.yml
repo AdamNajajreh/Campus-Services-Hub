@@ -1,5 +1,5 @@
 services:
-  postgres:
+  booking-postgres:
     image: postgres:15-alpine
     container_name: booking-postgres
     environment:
@@ -7,10 +7,28 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: booking_db
     ports:
-      - "5433:5432" # Changed: external port 5433, internal port 5432
+      - "5433:5432"
     volumes:
       - booking-db-data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  request-postgres:
+    image: postgres:15-alpine
+    container_name: request-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: request_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - request-db-data:/var/lib/postgresql/data
+      - ./init-request.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -23,20 +41,42 @@ services:
     ports:
       - "5001:5001"
     environment:
-      DB_HOST: postgres
+      DB_HOST: booking-postgres
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_NAME: booking_db
-      DB_PORT: 5432 # Keep as 5432 - internal Docker network port
+      DB_PORT: 5432
       PORT: 5001
       DEBUG: "False"
       USER_SERVICE_URL: http://host.docker.internal:5000
       NOTIFICATION_SERVICE_URL: http://host.docker.internal:5003
       SECRET_KEY: campus-services-secret-key
     depends_on:
-      postgres:
+      booking-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  request-service:
+    image: request-service:latest
+    container_name: request-service
+    ports:
+      - "5002:5002"
+    environment:
+      DB_HOST: request-postgres
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: request_db
+      DB_PORT: 5432
+      PORT: 5002
+      DEBUG: "False"
+      USER_SERVICE_URL: http://host.docker.internal:5000
+      NOTIFICATION_SERVICE_URL: http://booking-service:5003
+      SECRET_KEY: campus-services-secret-key
+    depends_on:
+      request-postgres:
         condition: service_healthy
     restart: unless-stopped
 
 volumes:
   booking-db-data:
+  request-db-data:

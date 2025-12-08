@@ -1,6 +1,3 @@
--- Connect to booking_db (PostgreSQL entrypoint does this automatically, but being explicit helps)
-\c booking_db
-
 -- Create rooms table
 CREATE TABLE IF NOT EXISTS rooms (
     id SERIAL PRIMARY KEY,
