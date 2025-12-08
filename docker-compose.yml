@@ -160,6 +160,29 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  api-gateway:
+    image: api-gateway:latest
+    container_name: api-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: 8000
+      DEBUG: "False"
+      SECRET_KEY: campus-services-secret-key
+      USER_SERVICE_URL: http://user-service:5000
+      REQUEST_SERVICE_URL: http://request-service:5002
+      BOOKING_SERVICE_URL: http://booking-service:5001
+      NOTIFICATION_SERVICE_URL: http://notification-service:5003
+      RATE_LIMIT_ENABLED: "True"
+      RATE_LIMIT_PER_MINUTE: 100
+      REQUEST_TIMEOUT: 30
+    depends_on:
+      - user-service
+      - booking-service
+      - request-service
+      - notification-service
+    restart: unless-stopped
+
 volumes:
   user-db-data:
   booking-db-data:
