@@ -11,11 +11,16 @@ load_dotenv()
 class Config:
     """Application configuration"""
     
-    # MySQL Configuration
-    MYSQL_HOST = os.getenv("MYSQL_HOST", "172.17.0.1")
-    MYSQL_USER = os.getenv("MYSQL_USER", "root")
-    MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
-    MYSQL_DB = os.getenv("MYSQL_DB", "notification_db")
+    # PostgreSQL Configuration
+    DB_HOST = os.getenv("DB_HOST", "localhost")
+    DB_USER = os.getenv("DB_USER", "postgres")
+    DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres")
+    DB_NAME = os.getenv("DB_NAME", "notification_db")
+    DB_PORT = os.getenv("DB_PORT", "5432")
+    
+    # Application Configuration
+    PORT = int(os.getenv("PORT", "5003"))
+    DEBUG = os.getenv("DEBUG", "False").lower() == "true"
     
     # JWT Configuration (shared with other services)
     SECRET_KEY = os.getenv("SECRET_KEY", "campus-services-secret-key")
@@ -26,10 +31,6 @@ class Config:
     EMAIL_USER = os.getenv("EMAIL_USER", "")
     EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "")
     FROM_EMAIL = os.getenv("FROM_EMAIL", "noreply@campus.edu")
-    
-    # Application Configuration
-    PORT = int(os.getenv("PORT", "5003"))
-    DEBUG = os.getenv("DEBUG", "False").lower() == "true"
     
     # Notification Service Specific Configuration
     DEFAULT_NOTIFICATION_TYPE = "general"
@@ -46,7 +47,7 @@ class Config:
     @classmethod
     def validate_config(cls):
         """Validate required configuration"""
-        required_vars = ['MYSQL_HOST', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_DB']
+        required_vars = ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME']
         missing = [var for var in required_vars if not getattr(cls, var)]
         
         if missing:

@@ -5,9 +5,10 @@ Notification and Announcement Management Microservice
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import mysql.connector
+import psycopg2
+from psycopg2.extras import RealDictCursor
 import jwt
-import os
+import logging
 import time
 import smtplib
 from email.mime.text import MIMEText
@@ -20,6 +21,10 @@ from config import Config
 app = Flask(__name__)
 CORS(app)
 app.config.from_object(Config)
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class DatabaseError(Exception):
     """Custom exception for database errors"""
@@ -34,30 +39,20 @@ def get_db_connection():
     
     for attempt in range(max_retries):
         try:
-            conn = mysql.connector.connect(
-                host=app.config['MYSQL_HOST'],
-                user=app.config['MYSQL_USER'],
-                password=app.config['MYSQL_PASSWORD'],
-                database=app.config['MYSQL_DB'],
-                connection_timeout=5
+            conn = psycopg2.connect(
+                host=app.config['DB_HOST'],
+                port=app.config['DB_PORT'],
+                user=app.config['DB_USER'],
+                password=app.config['DB_PASSWORD'],
+                database=app.config['DB_NAME'],
+                connect_timeout=5
             )
             return conn
-        except mysql.connector.Error as e:
+        except psycopg2.Error as e:
             if attempt < max_retries - 1:
                 time.sleep(retry_delay)
             else:
                 raise DatabaseError(f"Failed to connect to database after {max_retries} attempts: {str(e)}")
-
-def get_root_connection():
-    """Get connection without database for initialization"""
-    try:
-        return mysql.connector.connect(
-            host=app.config['MYSQL_HOST'],
-            user=app.config['MYSQL_USER'],
-            password=app.config['MYSQL_PASSWORD']
-        )
-    except mysql.connector.Error as e:
-        raise DatabaseError(f"Cannot connect to MySQL server: {str(e)}")
 
 def validate_token(token):
     """
@@ -242,13 +237,14 @@ def create_notification():
             }), 400
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Insert new notification
         cursor.execute("""
             INSERT INTO notifications 
             (user_id, message, type, priority, status, created_at)
             VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (
             user_id,
             message,
@@ -258,7 +254,7 @@ def create_notification():
             datetime.now()
         ))
         
-        notification_id = cursor.lastrowid
+        notification_id = cursor.fetchone()['id']
         
         # Try to send email if email is provided and configured
         email_sent = False
@@ -334,7 +330,7 @@ def get_user_notifications(user_id):
         offset = (page - 1) * limit
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Build query
         query = "SELECT * FROM notifications WHERE user_id = %s"
@@ -401,7 +397,7 @@ def mark_as_read(notification_id):
     """
     try:
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Get notification to check ownership
         cursor.execute("SELECT user_id FROM notifications WHERE id = %s", (notification_id,))
@@ -577,13 +573,14 @@ def create_announcement():
             }), 400
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Insert new announcement
         cursor.execute("""
             INSERT INTO announcements 
             (title, content, target_audience, created_by, created_at)
             VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
         """, (
             title,
             content,
@@ -592,7 +589,7 @@ def create_announcement():
             datetime.now()
         ))
         
-        announcement_id = cursor.lastrowid
+        announcement_id = cursor.fetchone()['id']
         
         # Create notifications for all users (in a real system, you'd query user service)
         # For now, we'll just create a notification for the announcement creator
@@ -651,7 +648,7 @@ def get_announcements():
         user_role = request.current_user.get('role')
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Build query based on user role and audience
         query = "SELECT * FROM announcements WHERE 1=1"
@@ -715,7 +712,7 @@ def get_announcement(announcement_id):
     """
     try:
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         cursor.execute("SELECT * FROM announcements WHERE id = %s", (announcement_id,))
         announcement = cursor.fetchone()
@@ -770,7 +767,7 @@ def get_recent_announcements():
         limit = int(request.args.get('limit', 10))
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Get announcements from last 7 days
         cursor.execute("""
@@ -879,7 +876,7 @@ def get_notification_statistics():
     """
     try:
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Get basic statistics
         cursor.execute("""
@@ -959,116 +956,12 @@ def get_notification_statistics():
 # DATABASE INITIALIZATION
 # ============================
 
+# Database initialization is now handled by init.sql script
+# This function is kept for backward compatibility but does nothing
 def init_database():
-    """Initialize database and tables"""
-    max_retries = 5
-    retry_delay = 3
-    
-    for attempt in range(max_retries):
-        try:
-            # Create database if not exists
-            root_conn = get_root_connection()
-            root_cursor = root_conn.cursor()
-            root_cursor.execute(f"CREATE DATABASE IF NOT EXISTS {app.config['MYSQL_DB']}")
-            root_cursor.close()
-            root_conn.close()
-            
-            # Connect to specific database
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            
-            # Create notifications table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS notifications (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_id INT NOT NULL,
-                    message TEXT NOT NULL,
-                    type VARCHAR(50) DEFAULT 'general',
-                    priority ENUM('low', 'medium', 'high') DEFAULT 'medium',
-                    status ENUM('pending', 'sent', 'failed') DEFAULT 'pending',
-                    is_read BOOLEAN DEFAULT FALSE,
-                    read_at TIMESTAMP NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    
-                    INDEX idx_user_id (user_id),
-                    INDEX idx_is_read (is_read),
-                    INDEX idx_type (type),
-                    INDEX idx_created_at (created_at)
-                )
-            """)
-            
-            # Create announcements table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS announcements (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    title VARCHAR(255) NOT NULL,
-                    content TEXT NOT NULL,
-                    target_audience ENUM('all', 'students', 'staff', 'admin') DEFAULT 'all',
-                    created_by INT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    
-                    INDEX idx_target_audience (target_audience),
-                    INDEX idx_created_at (created_at)
-                )
-            """)
-            
-            # Check if we need to insert test data
-            cursor.execute("SELECT COUNT(*) FROM notifications")
-            notification_count = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT COUNT(*) FROM announcements")
-            announcement_count = cursor.fetchone()[0]
-            
-            if notification_count == 0:
-                # Insert sample notifications
-                sample_notifications = [
-                    (1, 'Welcome to Campus Services Hub! Get started by submitting your first request.', 'system', 'medium', 'sent', False, None, '2025-12-01 09:00:00'),
-                    (2, 'Your room booking for Conference Room has been confirmed for tomorrow at 2 PM.', 'booking_confirmed', 'medium', 'sent', True, '2025-12-02 10:30:00', '2025-12-02 10:00:00'),
-                    (3, 'Maintenance request #123 status updated to "In Progress".', 'request_update', 'low', 'sent', False, None, '2025-12-03 14:15:00'),
-                    (1, 'Don\'t forget: Campus cleanup event this Friday!', 'announcement', 'medium', 'sent', True, '2025-12-03 16:45:00', '2025-12-03 16:30:00'),
-                    (2, 'URGENT: Library will close early at 5 PM today.', 'urgent', 'high', 'sent', False, None, '2025-12-04 08:00:00'),
-                    (3, 'Your password was changed successfully. If this wasn\'t you, please contact support.', 'system', 'high', 'sent', True, '2025-12-04 11:20:00', '2025-12-04 11:00:00')
-                ]
-                
-                for notif in sample_notifications:
-                    cursor.execute("""
-                        INSERT INTO notifications 
-                        (user_id, message, type, priority, status, is_read, read_at, created_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    """, notif)
-            
-            if announcement_count == 0:
-                # Insert sample announcements
-                sample_announcements = [
-                    ('Welcome to Campus Services Hub', 'We are excited to launch the new Campus Services Hub platform! Submit maintenance requests and book rooms with ease.', 'all', 3, '2025-12-01 09:00:00'),
-                    ('Library Renovation Notice', 'Main library will be closed for renovation from Dec 10-20. Alternative study spaces available in Building B.', 'students', 3, '2025-12-02 14:00:00'),
-                    ('Staff Meeting Reminder', 'Monthly staff meeting scheduled for Friday at 2 PM in Conference Room. Please bring your reports.', 'staff', 3, '2025-12-03 10:30:00'),
-                    ('COVID-19 Guidelines Update', 'Please review the updated campus health and safety guidelines on the portal. Masks are recommended in crowded areas.', 'all', 3, '2025-12-04 08:45:00'),
-                    ('Admin System Maintenance', 'System maintenance scheduled for Sunday, Dec 8, 2-4 AM. Services may be unavailable during this time.', 'admin', 3, '2025-12-04 16:00:00')
-                ]
-                
-                for ann in sample_announcements:
-                    cursor.execute("""
-                        INSERT INTO announcements 
-                        (title, content, target_audience, created_by, created_at)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """, ann)
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-            return True
-            
-        except mysql.connector.Error as e:
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-            else:
-                return False
-        except Exception as e:
-            return False
-    
-    return False
+    """Database initialization is handled by init.sql script on Docker start"""
+    logger.info("Database initialization is handled by init.sql script")
+    return True
 
 # ============================
 # ERROR HANDLERS
@@ -1104,19 +997,26 @@ def internal_error(error):
 
 if __name__ == '__main__':
     try:
-        # Initialize database
-        if init_database():
-            # Start Flask app
-            app.run(
-                host='0.0.0.0',
-                port=app.config['PORT'],
-                debug=app.config['DEBUG'],
-                threaded=True
-            )
-        else:
-            print("Database initialization failed. Exiting.")
-            
+        # Database initialization is handled by init.sql script
+        # Just verify connection on startup
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            cursor.close()
+            conn.close()
+            logger.info("Database connection verified successfully")
+        except Exception as e:
+            logger.warning(f"Database connection check failed: {str(e)}")
+            logger.warning("Make sure PostgreSQL is running and init.sql has been executed")
+        
+        app.run(
+            host='0.0.0.0',
+            port=app.config['PORT'],
+            debug=app.config['DEBUG'],
+            threaded=True
+        )
     except KeyboardInterrupt:
-        print("Service stopped by user")
+        logger.info("Service stopped by user")
     except Exception as e:
-        print(f"Failed to start service: {str(e)}")
+        logger.error(f"Failed to start service: {str(e)}")
