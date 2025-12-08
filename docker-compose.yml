@@ -53,6 +53,24 @@ services:
       timeout: 5s
       retries: 5
 
+  notification-postgres:
+    image: postgres:15-alpine
+    container_name: notification-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: notification_db
+    ports:
+      - "5436:5432"
+    volumes:
+      - notification-db-data:/var/lib/postgresql/data
+      - ./init-noti.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   user-service:
     image: user-service:latest
     container_name: user-service
@@ -86,7 +104,7 @@ services:
       PORT: 5001
       DEBUG: "False"
       USER_SERVICE_URL: http://user-service:5000
-      NOTIFICATION_SERVICE_URL: http://host.docker.internal:5003
+      NOTIFICATION_SERVICE_URL: http://notification-service:5003
       SECRET_KEY: campus-services-secret-key
     depends_on:
       booking-postgres:
@@ -109,7 +127,7 @@ services:
       PORT: 5002
       DEBUG: "False"
       USER_SERVICE_URL: http://user-service:5000
-      NOTIFICATION_SERVICE_URL: http://host.docker.internal:5003
+      NOTIFICATION_SERVICE_URL: http://notification-service:5003
       SECRET_KEY: campus-services-secret-key
     depends_on:
       request-postgres:
@@ -118,7 +136,32 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  notification-service:
+    image: notification-service:latest
+    container_name: notification-service
+    ports:
+      - "5003:5003"
+    environment:
+      DB_HOST: notification-postgres
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: notification_db
+      DB_PORT: 5432
+      PORT: 5003
+      DEBUG: "False"
+      SECRET_KEY: campus-services-secret-key
+      EMAIL_HOST: smtp.gmail.com
+      EMAIL_PORT: 587
+      EMAIL_USER: ""
+      EMAIL_PASSWORD: ""
+      FROM_EMAIL: noreply@campus.edu
+    depends_on:
+      notification-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   user-db-data:
   booking-db-data:
   request-db-data:
+  notification-db-data:
