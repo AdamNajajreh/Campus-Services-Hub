@@ -5,7 +5,8 @@ Service Request Management Microservice
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import mysql.connector
+import psycopg2
+from psycopg2.extras import RealDictCursor
 import jwt
 import requests
 import os
@@ -31,30 +32,20 @@ def get_db_connection():
     
     for attempt in range(max_retries):
         try:
-            conn = mysql.connector.connect(
-                host=app.config['MYSQL_HOST'],
-                user=app.config['MYSQL_USER'],
-                password=app.config['MYSQL_PASSWORD'],
-                database=app.config['MYSQL_DB'],
-                connection_timeout=5
+            conn = psycopg2.connect(
+                host=app.config['DB_HOST'],
+                port=app.config['DB_PORT'],
+                user=app.config['DB_USER'],
+                password=app.config['DB_PASSWORD'],
+                database=app.config['DB_NAME'],
+                connect_timeout=5
             )
             return conn
-        except mysql.connector.Error as e:
+        except psycopg2.Error as e:
             if attempt < max_retries - 1:
                 time.sleep(retry_delay)
             else:
                 raise DatabaseError(f"Failed to connect to database after {max_retries} attempts: {str(e)}")
-
-def get_root_connection():
-    """Get connection without database for initialization"""
-    try:
-        return mysql.connector.connect(
-            host=app.config['MYSQL_HOST'],
-            user=app.config['MYSQL_USER'],
-            password=app.config['MYSQL_PASSWORD']
-        )
-    except mysql.connector.Error as e:
-        raise DatabaseError(f"Cannot connect to MySQL server: {str(e)}")
 
 def validate_token(token):
     """
@@ -238,13 +229,14 @@ def create_request():
             priority = 'medium'  # Downgrade to medium for students
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Insert new request
         cursor.execute("""
             INSERT INTO service_requests 
             (user_id, title, description, category, location, priority, status, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (
             request.current_user['user_id'],
             title,
@@ -256,7 +248,7 @@ def create_request():
             datetime.now()
         ))
         
-        request_id = cursor.lastrowid
+        request_id = cursor.fetchone()['id']
         
         # Send notification to user
         send_notification(
@@ -319,7 +311,7 @@ def get_requests():
         current_user_id = request.current_user['user_id']
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Build query based on user role
         query = "SELECT * FROM service_requests WHERE 1=1"
@@ -401,7 +393,7 @@ def get_request(request_id):
     """
     try:
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         cursor.execute("SELECT * FROM service_requests WHERE id = %s", (request_id,))
         request_data = cursor.fetchone()
@@ -470,7 +462,7 @@ def update_request_status(request_id):
             }), 400
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Get current request data
         cursor.execute("SELECT * FROM service_requests WHERE id = %s", (request_id,))
@@ -551,7 +543,7 @@ def update_request(request_id):
             }), 400
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Get current request data
         cursor.execute("SELECT * FROM service_requests WHERE id = %s", (request_id,))
@@ -655,7 +647,7 @@ def delete_request(request_id):
     """
     try:
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Get current request data
         cursor.execute("SELECT * FROM service_requests WHERE id = %s", (request_id,))
@@ -807,7 +799,7 @@ def assign_request(request_id):
         assigned_to = int(data['assigned_to'])
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Get current request data
         cursor.execute("SELECT * FROM service_requests WHERE id = %s", (request_id,))
@@ -869,7 +861,7 @@ def get_request_statistics():
     """
     try:
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Get basic statistics
         cursor.execute("""
@@ -890,7 +882,7 @@ def get_request_statistics():
             SELECT 
                 category,
                 COUNT(*) as count,
-                AVG(TIMESTAMPDIFF(HOUR, created_at, COALESCE(actual_completion_date, NOW()))) as avg_hours_to_complete
+                AVG(EXTRACT(EPOCH FROM (COALESCE(actual_completion_date, NOW()) - created_at))/3600) as avg_hours_to_complete
             FROM service_requests
             GROUP BY category
         """)
@@ -935,88 +927,14 @@ def get_request_statistics():
 # DATABASE INITIALIZATION
 # ============================
 
+# Database initialization is now handled by init.sql script
+# This function is kept for backward compatibility but does nothing
 def init_database():
-    """Initialize database and tables"""
-    max_retries = 5
-    retry_delay = 3
-    
-    for attempt in range(max_retries):
-        try:
-            # Create database if not exists
-            root_conn = get_root_connection()
-            root_cursor = root_conn.cursor()
-            root_cursor.execute(f"CREATE DATABASE IF NOT EXISTS {app.config['MYSQL_DB']}")
-            root_cursor.close()
-            root_conn.close()
-            
-            # Connect to specific database
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            
-            # Create service_requests table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS service_requests (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_id INT NOT NULL,
-                    title VARCHAR(255) NOT NULL,
-                    description TEXT NOT NULL,
-                    category ENUM('maintenance', 'cleaning', 'it_support', 'facilities', 'other') DEFAULT 'maintenance',
-                    location VARCHAR(255),
-                    priority ENUM('low', 'medium', 'high', 'urgent') DEFAULT 'medium',
-                    status ENUM('pending', 'in_progress', 'completed', 'cancelled') DEFAULT 'pending',
-                    admin_notes TEXT,
-                    assigned_to INT,
-                    estimated_completion_date DATE,
-                    actual_completion_date TIMESTAMP NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP NULL ON UPDATE CURRENT_TIMESTAMP,
-                    
-                    INDEX idx_user_id (user_id),
-                    INDEX idx_status (status),
-                    INDEX idx_category (category),
-                    INDEX idx_priority (priority),
-                    INDEX idx_assigned_to (assigned_to),
-                    INDEX idx_created_at (created_at)
-                )
-            """)
-            
-            # Check if we need to insert test data
-            cursor.execute("SELECT COUNT(*) FROM service_requests")
-            request_count = cursor.fetchone()[0]
-            
-            if request_count == 0:
-                # Insert sample requests
-                sample_requests = [
-                    (1, 'Leaking faucet', 'Faucet in bathroom keeps dripping all night', 'maintenance', 'Science Building, Room 201', 'medium', 'completed', 'Fixed by maintenance team', 2, '2025-12-05', '2025-12-04 14:30:00'),
-                    (3, 'Broken chair', 'Office chair in room 105 is broken', 'maintenance', 'Admin Building, Room 105', 'low', 'in_progress', 'Waiting for replacement parts', 2, '2025-12-10', None),
-                    (2, 'Room cleaning needed', 'Classroom needs cleaning after lab session', 'cleaning', 'Main Building, Room 301', 'medium', 'pending', None, None, None, None),
-                    (1, 'Projector not working', 'Projector in lecture hall shows no display', 'it_support', 'Lecture Hall A', 'high', 'pending', None, None, None, None),
-                    (4, 'Printer paper needed', 'Printer in library out of paper', 'facilities', 'Library, 2nd floor', 'low', 'completed', 'Restocked paper', 3, '2025-12-03', '2025-12-03 10:15:00'),
-                    (5, 'Window broken', 'Window pane cracked in lab', 'maintenance', 'Chemistry Lab, Room 204', 'urgent', 'in_progress', 'Safety issue - needs immediate attention', 2, '2025-12-05', None)
-                ]
-                
-                for req in sample_requests:
-                    cursor.execute("""
-                        INSERT INTO service_requests 
-                        (user_id, title, description, category, location, priority, status, admin_notes, assigned_to, estimated_completion_date, actual_completion_date)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, req)
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-            return True
-            
-        except mysql.connector.Error as e:
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-            else:
-                return False
-        except Exception as e:
-            return False
-    
-    return False
+    """Database initialization is handled by init.sql script on Docker start"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("Database initialization is handled by init.sql script")
+    return True
 
 # ============================
 # ERROR HANDLERS
@@ -1052,19 +970,26 @@ def internal_error(error):
 
 if __name__ == '__main__':
     try:
-        # Initialize database
-        if init_database():
-            # Start Flask app
-            app.run(
-                host='0.0.0.0',
-                port=app.config['PORT'],
-                debug=app.config['DEBUG'],
-                threaded=True
-            )
-        else:
-            print("Database initialization failed. Exiting.")
-            
+        # Database initialization is handled by init.sql script
+        # Just verify connection on startup
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            cursor.close()
+            conn.close()
+            logger.info("Database connection verified successfully")
+        except Exception as e:
+            logger.warning(f"Database connection check failed: {str(e)}")
+            logger.warning("Make sure PostgreSQL is running and init.sql has been executed")
+        
+        app.run(
+            host='0.0.0.0',
+            port=app.config['PORT'],
+            debug=app.config['DEBUG'],
+            threaded=True
+        )
     except KeyboardInterrupt:
-        print("Service stopped by user")
+        logger.info("Service stopped by user")
     except Exception as e:
-        print(f"Failed to start service: {str(e)}")
+        logger.error(f"Failed to start service: {str(e)}")

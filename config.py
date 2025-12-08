@@ -11,11 +11,12 @@ load_dotenv()
 class Config:
     """Application configuration"""
     
-    # MySQL Configuration
-    MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
-    MYSQL_USER = os.getenv("MYSQL_USER", "root")
-    MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
-    MYSQL_DB = os.getenv("MYSQL_DB", "request_db")
+    # PostgreSQL Configuration
+    DB_HOST = os.getenv("DB_HOST", "localhost")
+    DB_USER = os.getenv("DB_USER", "postgres")
+    DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres")
+    DB_NAME = os.getenv("DB_NAME", "request_db")
+    DB_PORT = os.getenv("DB_PORT", "5432")
     
     # JWT Configuration (same as user service)
     SECRET_KEY = os.getenv("SECRET_KEY", "campus-services-secret-key")
@@ -41,7 +42,7 @@ class Config:
     @classmethod
     def validate_config(cls):
         """Validate required configuration"""
-        required_vars = ['MYSQL_HOST', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_DB']
+        required_vars = ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME']
         missing = [var for var in required_vars if not getattr(cls, var)]
         
         if missing:
