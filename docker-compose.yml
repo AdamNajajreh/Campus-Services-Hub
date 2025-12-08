@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: user_db
     ports:
-      - "5432:5432"
+      - "5435:5432"
     volumes:
       - user-db-data:/var/lib/postgresql/data
       - ./init-user.sql:/docker-entrypoint-initdb.d/init.sql
@@ -57,7 +57,7 @@ services:
     image: user-service:latest
     container_name: user-service
     ports:
-      - "5000:5000"
+      - "5010:5000"
     environment:
       DB_HOST: user-postgres
       DB_USER: postgres

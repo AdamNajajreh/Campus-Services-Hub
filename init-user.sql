@@ -27,3 +27,4 @@ BEGIN
         ('staff@campus.edu', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NU7P6y5W8Szi', 'Jane Staff', 'staff');
     END IF;
 END $$;
+
