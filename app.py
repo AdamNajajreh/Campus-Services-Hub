@@ -5,10 +5,11 @@ Authentication and User Management Microservice
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import mysql.connector
+import psycopg2
+from psycopg2.extras import RealDictCursor
 import jwt
 import bcrypt
-import os
+import logging
 import time
 from datetime import datetime, timedelta
 from functools import wraps
@@ -18,6 +19,10 @@ from config import Config
 app = Flask(__name__)
 CORS(app)
 app.config.from_object(Config)
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class DatabaseError(Exception):
     """Custom exception for database errors"""
@@ -32,30 +37,20 @@ def get_db_connection():
     
     for attempt in range(max_retries):
         try:
-            conn = mysql.connector.connect(
-                host=app.config['MYSQL_HOST'],
-                user=app.config['MYSQL_USER'],
-                password=app.config['MYSQL_PASSWORD'],
-                database=app.config['MYSQL_DB'],
-                connection_timeout=5
+            conn = psycopg2.connect(
+                host=app.config['DB_HOST'],
+                port=app.config['DB_PORT'],
+                user=app.config['DB_USER'],
+                password=app.config['DB_PASSWORD'],
+                database=app.config['DB_NAME'],
+                connect_timeout=5
             )
             return conn
-        except mysql.connector.Error as e:
+        except psycopg2.Error as e:
             if attempt < max_retries - 1:
                 time.sleep(retry_delay)
             else:
                 raise DatabaseError(f"Failed to connect to database after {max_retries} attempts: {str(e)}")
-
-def get_root_connection():
-    """Get connection without database for initialization"""
-    try:
-        return mysql.connector.connect(
-            host=app.config['MYSQL_HOST'],
-            user=app.config['MYSQL_USER'],
-            password=app.config['MYSQL_PASSWORD']
-        )
-    except mysql.connector.Error as e:
-        raise DatabaseError(f"Cannot connect to MySQL server: {str(e)}")
 
 def token_required(f):
     """
@@ -238,7 +233,7 @@ def register():
         ).decode('utf-8')
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Check if user already exists
         cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
@@ -256,9 +251,10 @@ def register():
         cursor.execute("""
             INSERT INTO users (email, password, name, role, created_at)
             VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
         """, (email, hashed_password, name, role, datetime.now()))
         
-        user_id = cursor.lastrowid
+        user_id = cursor.fetchone()['id']
         
         # Generate JWT token
         token_payload = {
@@ -327,7 +323,7 @@ def login():
         password = data['password']
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Get user by email
         cursor.execute("""
@@ -474,7 +470,7 @@ def get_current_user():
         user_id = request.current_user['user_id']
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         cursor.execute("""
             SELECT id, email, name, role, created_at, updated_at
@@ -526,7 +522,7 @@ def get_user(user_id):
             }), 403
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         cursor.execute("""
             SELECT id, email, name, role, created_at, updated_at
@@ -657,7 +653,7 @@ def change_password():
             }), 400
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Get current password hash
         cursor.execute("SELECT password FROM users WHERE id = %s", (user_id,))
@@ -740,7 +736,7 @@ def get_all_users():
         offset = (page - 1) * limit
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Build query
         query = """
@@ -913,70 +909,12 @@ def delete_user(user_id):
 # DATABASE INITIALIZATION
 # ============================
 
+# Database initialization is now handled by init.sql script
+# This function is kept for backward compatibility but does nothing
 def init_database():
-    """Initialize database and tables"""
-    max_retries = 5
-    retry_delay = 3
-    
-    for attempt in range(max_retries):
-        try:
-            # Create database
-            root_conn = get_root_connection()
-            root_cursor = root_conn.cursor()
-            root_cursor.execute(f"CREATE DATABASE IF NOT EXISTS {app.config['MYSQL_DB']}")
-            root_cursor.close()
-            root_conn.close()
-            
-            # Connect to specific database
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            
-            # Create users table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    email VARCHAR(255) UNIQUE NOT NULL,
-                    password VARCHAR(255) NOT NULL,
-                    name VARCHAR(255) NOT NULL,
-                    role ENUM('student', 'staff', 'admin') DEFAULT 'student',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP NULL ON UPDATE CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Check if we need to insert test data
-            cursor.execute("SELECT COUNT(*) FROM users")
-            user_count = cursor.fetchone()[0]
-            
-            if user_count == 0:
-                test_users = [
-                    ('admin@campus.edu', 'admin123', 'Admin User', 'admin'),
-                    ('student@campus.edu', 'student123', 'John Student', 'student'),
-                    ('staff@campus.edu', 'staff123', 'Jane Staff', 'staff')
-                ]
-                
-                for email, password, name, role in test_users:
-                    hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-                    cursor.execute(
-                        "INSERT INTO users (email, password, name, role) VALUES (%s, %s, %s, %s)",
-                        (email, hashed, name, role)
-                    )
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-            return True
-            
-        except mysql.connector.Error as e:
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-            else:
-                return False
-        except Exception as e:
-            return False
-    
-    return False
+    """Database initialization is handled by init.sql script on Docker start"""
+    logger.info("Database initialization is handled by init.sql script")
+    return True
 
 # ============================
 # ERROR HANDLERS
@@ -1012,19 +950,26 @@ def internal_error(error):
 
 if __name__ == '__main__':
     try:
-        # Initialize database
-        if init_database():
-            # Start Flask app
-            app.run(
-                host='0.0.0.0',
-                port=5000,
-                debug=False,
-                threaded=True
-            )
-        else:
-            print("Database initialization failed. Exiting.")
-            
+        # Database initialization is handled by init.sql script
+        # Just verify connection on startup
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            cursor.close()
+            conn.close()
+            logger.info("Database connection verified successfully")
+        except Exception as e:
+            logger.warning(f"Database connection check failed: {str(e)}")
+            logger.warning("Make sure PostgreSQL is running and init.sql has been executed")
+        
+        app.run(
+            host='0.0.0.0',
+            port=app.config['PORT'],
+            debug=app.config['DEBUG'],
+            threaded=True
+        )
     except KeyboardInterrupt:
-        print("Service stopped by user")
+        logger.info("Service stopped by user")
     except Exception as e:
-        print(f"Failed to start service: {str(e)}")
+        logger.error(f"Failed to start service: {str(e)}")
