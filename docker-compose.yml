@@ -183,6 +183,18 @@ services:
       - notification-service
     restart: unless-stopped
 
+  frontend-service:
+    image: frontend-service:latest
+    container_name: frontend-service
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NODE_ENV: production
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
+
 volumes:
   user-db-data:
   booking-db-data:
