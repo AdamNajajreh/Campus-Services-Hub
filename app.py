@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import mysql.connector
+import psycopg2
+from psycopg2.extras import RealDictCursor
 import os
 from datetime import datetime, timedelta
 import logging
@@ -30,30 +31,20 @@ def get_db_connection():
     
     for attempt in range(max_retries):
         try:
-            conn = mysql.connector.connect(
+            conn = psycopg2.connect(
                 host=Config.DB_HOST,
+                port=Config.DB_PORT,
                 user=Config.DB_USER,
                 password=Config.DB_PASSWORD,
                 database=Config.DB_NAME,
-                connection_timeout=5
+                connect_timeout=5
             )
             return conn
-        except mysql.connector.Error as e:
+        except psycopg2.Error as e:
             if attempt < max_retries - 1:
                 time.sleep(retry_delay)
             else:
                 raise DatabaseError(f"Failed to connect to database after {max_retries} attempts: {str(e)}")
-
-def get_root_connection():
-    """Get connection without database for initialization"""
-    try:
-        return mysql.connector.connect(
-            host=Config.DB_HOST,
-            user=Config.DB_USER,
-            password=Config.DB_PASSWORD
-        )
-    except mysql.connector.Error as e:
-        raise DatabaseError(f"Cannot connect to MySQL server: {str(e)}")
 
 def validate_user(token):
     """Validate user token with user service"""
@@ -102,7 +93,7 @@ def health_check():
 def get_rooms():
     try:
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         cursor.execute("SELECT * FROM rooms WHERE is_available = TRUE")
         rooms = cursor.fetchall()
@@ -129,7 +120,7 @@ def check_availability(room_id):
         date = request.args.get('date', datetime.now().date().isoformat())
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         cursor.execute("""
             SELECT start_time, end_time FROM bookings 
@@ -208,7 +199,7 @@ def create_booking():
             }), 400
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Check room availability
         cursor.execute("""
@@ -227,13 +218,14 @@ def create_booking():
                 'message': 'Room is already booked for this time slot'
             }), 409
         
-        # Create booking
+        # Create booking and return the ID
         cursor.execute("""
             INSERT INTO bookings (user_id, room_id, start_time, end_time, purpose, status)
             VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (user_data['id'], room_id, start_time, end_time, purpose, 'confirmed'))
         
-        booking_id = cursor.lastrowid
+        booking_id = cursor.fetchone()['id']
         
         # Get room name for notification
         cursor.execute("SELECT name FROM rooms WHERE id = %s", (room_id,))
@@ -292,7 +284,7 @@ def get_bookings():
             }), 401
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         if user_data['role'] in ['staff', 'admin']:
             cursor.execute("""
@@ -353,7 +345,7 @@ def cancel_booking(booking_id):
             }), 401
         
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         cursor.execute("SELECT * FROM bookings WHERE id = %s", (booking_id,))
         booking = cursor.fetchone()
@@ -411,85 +403,12 @@ def cancel_booking(booking_id):
             'error': str(e)
         }), 500
 
+# Database initialization is now handled by init.sql script
+# This function is kept for backward compatibility but does nothing
 def init_database():
-    """Initialize database and tables"""
-    max_retries = 5
-    retry_delay = 3
-    
-    for attempt in range(max_retries):
-        try:
-            # Create database if not exists
-            root_conn = get_root_connection()
-            root_cursor = root_conn.cursor()
-            root_cursor.execute(f"CREATE DATABASE IF NOT EXISTS {Config.DB_NAME}")
-            root_cursor.close()
-            root_conn.close()
-            
-            # Connect to specific database
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS rooms (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    name VARCHAR(100) NOT NULL,
-                    type ENUM('classroom', 'lab', 'meeting_room', 'auditorium', 'other') DEFAULT 'classroom',
-                    capacity INT NOT NULL,
-                    location VARCHAR(255),
-                    equipment TEXT,
-                    is_available BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS bookings (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_id INT NOT NULL,
-                    room_id INT NOT NULL,
-                    start_time DATETIME NOT NULL,
-                    end_time DATETIME NOT NULL,
-                    purpose VARCHAR(255),
-                    status ENUM('pending', 'confirmed', 'cancelled', 'completed') DEFAULT 'confirmed',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP NULL ON UPDATE CURRENT_TIMESTAMP,
-                    FOREIGN KEY (room_id) REFERENCES rooms(id),
-                    INDEX idx_user_id (user_id),
-                    INDEX idx_room_id (room_id),
-                    INDEX idx_status (status),
-                    INDEX idx_start_time (start_time)
-                )
-            """)
-            
-            # Insert sample rooms
-            cursor.execute("SELECT COUNT(*) FROM rooms")
-            if cursor.fetchone()[0] == 0:
-                cursor.execute("""
-                    INSERT INTO rooms (name, type, capacity, location, equipment) VALUES
-                    ('Room 101', 'classroom', 30, 'Main Building - First Floor', 'Projector, Whiteboard'),
-                    ('Computer Lab A', 'lab', 25, 'Tech Building - Ground Floor', '25 Computers, Projector'),
-                    ('Conference Room', 'meeting_room', 10, 'Admin Building - Second Floor', 'TV, Whiteboard, Phone'),
-                    ('Chemistry Lab', 'lab', 20, 'Science Building - First Floor', 'Lab Equipment, Fume Hood'),
-                    ('Auditorium', 'auditorium', 200, 'Main Building - Ground Floor', 'Stage, Sound System, Projector')
-                """)
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-            return True
-            
-        except mysql.connector.Error as e:
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-            else:
-                logger.error(f"Database initialization failed: {str(e)}")
-                return False
-        except Exception as e:
-            logger.error(f"Unexpected error during initialization: {str(e)}")
-            return False
-    
-    return False
+    """Database initialization is handled by init.sql script on Docker start"""
+    logger.info("Database initialization is handled by init.sql script")
+    return True
 
 @app.errorhandler(404)
 def not_found(error):
@@ -505,16 +424,26 @@ def internal_error(error):
 
 if __name__ == '__main__':
     try:
-        if init_database():
-            app.run(
-                host='0.0.0.0',
-                port=5001,  # Fixed port to match Dockerfile
-                debug=Config.DEBUG if hasattr(Config, 'DEBUG') else False,
-                threaded=True
-            )
-        else:
-            print("Database initialization failed. Exiting.")
+        # Database initialization is handled by init.sql script
+        # Just verify connection on startup
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            cursor.close()
+            conn.close()
+            logger.info("Database connection verified successfully")
+        except Exception as e:
+            logger.warning(f"Database connection check failed: {str(e)}")
+            logger.warning("Make sure PostgreSQL is running and init.sql has been executed")
+        
+        app.run(
+            host='0.0.0.0',
+            port=Config.PORT if hasattr(Config, 'PORT') else 5001,
+            debug=Config.DEBUG if hasattr(Config, 'DEBUG') else False,
+            threaded=True
+        )
     except KeyboardInterrupt:
-        print("Service stopped by user")
+        logger.info("Service stopped by user")
     except Exception as e:
-        print(f"Failed to start service: {str(e)}")
+        logger.error(f"Failed to start service: {str(e)}")
