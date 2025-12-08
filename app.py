@@ -403,7 +403,7 @@ def assign_request(request_id):
 @rate_limit_middleware
 def get_request_statistics():
     """Get request statistics"""
-    return forward_request(SERVICES['request'], '/requests/stats', method='GET')
+    return forward_request(SERVICES['request'], '/stats', method='GET')
 
 # ============================
 # BOOKING SERVICE ROUTES
@@ -536,7 +536,7 @@ def get_recent_announcements():
 @rate_limit_middleware
 def get_notification_statistics():
     """Get notification statistics"""
-    return forward_request(SERVICES['notification'], '/notifications/stats', method='GET')
+    return forward_request(SERVICES['notification'], '/stats', method='GET')
 
 # ============================
 # ERROR HANDLERS
