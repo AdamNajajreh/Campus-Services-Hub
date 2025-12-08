@@ -9,7 +9,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import jwt
 import requests
-import os
+import logging
 import time
 from datetime import datetime
 from functools import wraps
@@ -18,6 +18,10 @@ from config import Config
 app = Flask(__name__)
 CORS(app)
 app.config.from_object(Config)
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class DatabaseError(Exception):
     """Custom exception for database errors"""
@@ -930,9 +934,6 @@ def get_request_statistics():
 # Database initialization is now handled by init.sql script
 # This function is kept for backward compatibility but does nothing
 def init_database():
-    """Database initialization is handled by init.sql script on Docker start"""
-    import logging
-    logger = logging.getLogger(__name__)
     logger.info("Database initialization is handled by init.sql script")
     return True
 
