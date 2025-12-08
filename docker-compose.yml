@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: booking-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: booking_db
+    ports:
+      - "5433:5432" # Changed: external port 5433, internal port 5432
+    volumes:
+      - booking-db-data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  booking-service:
+    image: booking-service:latest
+    container_name: booking-service
+    ports:
+      - "5001:5001"
+    environment:
+      DB_HOST: postgres
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: booking_db
+      DB_PORT: 5432 # Keep as 5432 - internal Docker network port
+      PORT: 5001
+      DEBUG: "False"
+      USER_SERVICE_URL: http://host.docker.internal:5000
+      NOTIFICATION_SERVICE_URL: http://host.docker.internal:5003
+      SECRET_KEY: campus-services-secret-key
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  booking-db-data:
