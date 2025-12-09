@@ -5,6 +5,7 @@ Modern Next.js frontend for the Campus Services Hub microservices platform.
 ## Quick Start
 
 ### Prerequisites
+
 - Node.js 20+ or Docker
 - Access to the API Gateway (running on port 8000)
 
