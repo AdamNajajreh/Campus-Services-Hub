@@ -19,12 +19,9 @@ export default function LoginPage() {
     try {
       const response = await login({ email, password });
 
-      if (response.token) {
-        // Store token in localStorage
-        localStorage.setItem("token", response.token);
-        localStorage.setItem("user", JSON.stringify(response.user));
-
-        // Redirect to dashboard
+      if (response.data?.token) {
+        localStorage.setItem("token", response.data.token);
+        localStorage.setItem("user", JSON.stringify(response.data.user));
         router.push("/dashboard");
       } else {
         setError("Login failed. Please try again.");
