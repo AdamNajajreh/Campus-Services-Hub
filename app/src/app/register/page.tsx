@@ -58,18 +58,18 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
+    <div className="min-h-screen flex items-center justify-center bg-stone-100 p-4">
       <div className="bg-white p-8 rounded-lg shadow-lg w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Create Account</h1>
-          <p className="text-gray-600 mt-2">Join Campus Services Hub</p>
+          <h1 className="text-3xl font-bold text-stone-950">Create Account</h1>
+          <p className="text-stone-600 mt-2">Join Campus Services Hub</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">{error}</div>}
 
           <div>
-            <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-2">
+            <label htmlFor="name" className="block text-sm font-medium text-stone-700 mb-2">
               Full Name
             </label>
             <input
@@ -79,13 +79,13 @@ export default function RegisterPage() {
               value={formData.name}
               onChange={handleChange}
               required
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+              className="w-full px-3 py-2 border border-stone-300 rounded-md focus:outline-none focus:ring-2 focus:ring-stone-500 text-stone-900 bg-white"
               placeholder="John Doe"
             />
           </div>
 
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
+            <label htmlFor="email" className="block text-sm font-medium text-stone-700 mb-2">
               Email
             </label>
             <input
@@ -95,13 +95,13 @@ export default function RegisterPage() {
               value={formData.email}
               onChange={handleChange}
               required
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+              className="w-full px-3 py-2 border border-stone-300 rounded-md focus:outline-none focus:ring-2 focus:ring-stone-500 text-stone-900 bg-white"
               placeholder="student@campus.edu"
             />
           </div>
 
           <div>
-            <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-2">
+            <label htmlFor="role" className="block text-sm font-medium text-stone-700 mb-2">
               Role
             </label>
             <select
@@ -109,7 +109,7 @@ export default function RegisterPage() {
               name="role"
               value={formData.role}
               onChange={handleChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+              className="w-full px-3 py-2 border border-stone-300 rounded-md focus:outline-none focus:ring-2 focus:ring-stone-500 text-stone-900 bg-white"
             >
               <option value="student">Student</option>
               <option value="staff">Staff</option>
@@ -117,7 +117,7 @@ export default function RegisterPage() {
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
+            <label htmlFor="password" className="block text-sm font-medium text-stone-700 mb-2">
               Password
             </label>
             <input
@@ -127,13 +127,13 @@ export default function RegisterPage() {
               value={formData.password}
               onChange={handleChange}
               required
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+              className="w-full px-3 py-2 border border-stone-300 rounded-md focus:outline-none focus:ring-2 focus:ring-stone-500 text-stone-900 bg-white"
               placeholder="••••••••"
             />
           </div>
 
           <div>
-            <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-2">
+            <label htmlFor="confirmPassword" className="block text-sm font-medium text-stone-700 mb-2">
               Confirm Password
             </label>
             <input
@@ -143,7 +143,7 @@ export default function RegisterPage() {
               value={formData.confirmPassword}
               onChange={handleChange}
               required
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+              className="w-full px-3 py-2 border border-stone-300 rounded-md focus:outline-none focus:ring-2 focus:ring-stone-500 text-stone-900 bg-white"
               placeholder="••••••••"
             />
           </div>
@@ -151,16 +151,16 @@ export default function RegisterPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full bg-stone-950 text-white py-2 px-4 rounded-md hover:bg-stone-800 focus:outline-none focus:ring-2 focus:ring-stone-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {loading ? "Creating account..." : "Create Account"}
           </button>
         </form>
 
         <div className="mt-6 text-center">
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-stone-600">
             Already have an account?{" "}
-            <a href="/login" className="text-blue-600 hover:text-blue-700 font-medium">
+            <a href="/login" className="text-stone-950 hover:text-stone-700 font-medium">
               Sign in
             </a>
           </p>
