@@ -43,10 +43,9 @@ export default function RegisterPage() {
         role: formData.role,
       });
 
-      if (response.token) {
-        // Store token and redirect
-        localStorage.setItem("token", response.token);
-        localStorage.setItem("user", JSON.stringify(response.user));
+      if (response.data?.token) {
+        localStorage.setItem("token", response.data.token);
+        localStorage.setItem("user", JSON.stringify(response.data.user));
         router.push("/dashboard");
       } else {
         setError("Registration failed. Please try again.");

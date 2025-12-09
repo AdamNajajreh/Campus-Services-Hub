@@ -17,10 +17,20 @@ interface RegisterData {
   role: string;
 }
 
+interface User {
+  id: number;
+  email: string;
+  name: string;
+  role: string;
+}
+
+interface AuthData {
+  token: string;
+  user: User;
+}
+
 interface ApiResponse<T = unknown> {
   success?: boolean;
-  token?: string;
-  user?: unknown;
   message?: string;
   data?: T;
 }
@@ -51,8 +61,8 @@ async function fetchAPI<T = unknown>(endpoint: string, options: RequestInit = {}
 /**
  * Login user
  */
-export async function login(credentials: LoginData) {
-  return fetchAPI("/api/auth/login", {
+export async function login(credentials: LoginData): Promise<ApiResponse<AuthData>> {
+  return fetchAPI<AuthData>("/api/auth/login", {
     method: "POST",
     body: JSON.stringify(credentials),
   });
@@ -61,8 +71,8 @@ export async function login(credentials: LoginData) {
 /**
  * Register new user
  */
-export async function register(userData: RegisterData) {
-  return fetchAPI("/api/auth/register", {
+export async function register(userData: RegisterData): Promise<ApiResponse<AuthData>> {
+  return fetchAPI<AuthData>("/api/auth/register", {
     method: "POST",
     body: JSON.stringify(userData),
   });
