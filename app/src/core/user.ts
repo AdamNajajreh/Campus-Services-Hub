@@ -24,9 +24,10 @@ export async function updateProfile(token: string, data: { name?: string; email?
 /**
  * Change password
  */
-export async function changePassword(token: string, data: { old_password: string; new_password: string }) {
+export async function changePassword(token: string, data: { current_password: string; new_password: string }) {
   return fetchWithAuth("/api/users/me/password", token, {
     method: "PUT",
     body: JSON.stringify(data),
   });
 }
+
