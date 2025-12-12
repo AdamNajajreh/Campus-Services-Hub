@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { TopBar } from "../Common/TopBar";
 import { FiCalendar, FiTool, FiBell } from "react-icons/fi";
+import { getBookings, getRequests, getUnreadCount } from "@/core/api";
 
 /**
  * @component
@@ -11,17 +12,59 @@ import { FiCalendar, FiTool, FiBell } from "react-icons/fi";
  */
 export const Dashboard = () => {
   const [userName, setUserName] = useState<string>("");
+  const [bookingsCount, setBookingsCount] = useState<number>(0);
+  const [requestsCount, setRequestsCount] = useState<number>(0);
+  const [notificationsCount, setNotificationsCount] = useState<number>(0);
+  const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    const userStr = localStorage.getItem("user");
-    if (userStr) {
-      try {
-        const user = JSON.parse(userStr);
-        setUserName(user.name || "Student");
-      } catch (e) {
-        setUserName("Student");
+    const fetchData = async () => {
+      const userStr = localStorage.getItem("user");
+      const token = localStorage.getItem("token");
+
+      if (userStr) {
+        try {
+          const user = JSON.parse(userStr);
+          setUserName(user.name || "Student");
+
+          if (token) {
+            try {
+              const bookingsResponse = await getBookings(token);
+              if (bookingsResponse.data && Array.isArray(bookingsResponse.data)) {
+                setBookingsCount(bookingsResponse.data.length);
+              }
+            } catch (error) {
+              console.error("Failed to fetch bookings:", error);
+            }
+
+            try {
+              const requestsResponse = await getRequests(token);
+              if (requestsResponse.data?.requests && Array.isArray(requestsResponse.data.requests)) {
+                setRequestsCount(requestsResponse.data.requests.length);
+              }
+            } catch (error) {
+              console.error("Failed to fetch requests:", error);
+            }
+
+            // Fetch unread notifications count
+            try {
+              const notificationsResponse = await getUnreadCount(token, user.id);
+              if (notificationsResponse.data?.unread_count !== undefined) {
+                setNotificationsCount(notificationsResponse.data.unread_count);
+              }
+            } catch (error) {
+              console.error("Failed to fetch notifications:", error);
+            }
+          }
+        } catch (e) {
+          setUserName("Student");
+        }
       }
-    }
+
+      setLoading(false);
+    };
+
+    fetchData();
   }, []);
 
   return (
@@ -44,7 +87,7 @@ export const Dashboard = () => {
               </div>
               <h3 className="text-sm font-medium text-stone-600">My Bookings</h3>
             </div>
-            <p className="text-3xl font-bold text-stone-950">0</p>
+            <p className="text-3xl font-bold text-stone-950">{loading ? "..." : bookingsCount}</p>
             <p className="text-xs text-stone-500 mt-1">Active bookings</p>
           </div>
 
@@ -55,7 +98,7 @@ export const Dashboard = () => {
               </div>
               <h3 className="text-sm font-medium text-stone-600">Service Requests</h3>
             </div>
-            <p className="text-3xl font-bold text-stone-950">0</p>
+            <p className="text-3xl font-bold text-stone-950">{loading ? "..." : requestsCount}</p>
             <p className="text-xs text-stone-500 mt-1">Open requests</p>
           </div>
 
@@ -66,7 +109,7 @@ export const Dashboard = () => {
               </div>
               <h3 className="text-sm font-medium text-stone-600">Notifications</h3>
             </div>
-            <p className="text-3xl font-bold text-stone-950">0</p>
+            <p className="text-3xl font-bold text-stone-950">{loading ? "..." : notificationsCount}</p>
             <p className="text-xs text-stone-500 mt-1">Unread messages</p>
           </div>
         </div>

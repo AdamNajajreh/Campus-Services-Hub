@@ -165,3 +165,49 @@ export async function createRequest(
 export async function getRequests(token: string) {
   return fetchWithAuth("/api/requests", token);
 }
+
+/**
+ * Get user notifications
+ */
+export async function getUserNotifications(token: string, userId: number) {
+  return fetchWithAuth(`/api/notifications/user/${userId}`, token);
+}
+
+/**
+ * Get unread notification count
+ */
+export async function getUnreadCount(token: string, userId: number) {
+  return fetchWithAuth(`/api/notifications/unread/count/${userId}`, token);
+}
+
+/**
+ * Mark notification as read
+ */
+export async function markNotificationAsRead(token: string, notificationId: number) {
+  return fetchWithAuth(`/api/notifications/${notificationId}/read`, token, {
+    method: "PUT",
+  });
+}
+
+/**
+ * Mark all notifications as read
+ */
+export async function markAllNotificationsAsRead(token: string) {
+  return fetchWithAuth("/api/notifications/mark-all-read", token, {
+    method: "PUT",
+  });
+}
+
+/**
+ * Get announcements
+ */
+export async function getAnnouncements(token: string) {
+  return fetchWithAuth("/api/announcements", token);
+}
+
+/**
+ * Get recent announcements
+ */
+export async function getRecentAnnouncements(token: string) {
+  return fetchWithAuth("/api/announcements/recent", token);
+}
