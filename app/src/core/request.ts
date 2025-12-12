@@ -1,0 +1,64 @@
+/**
+ * Request Service API
+ */
+
+import { fetchWithAuth } from "./client";
+
+/**
+ * Get all service requests
+ */
+export async function getRequests(token: string) {
+  return fetchWithAuth("/api/requests", token);
+}
+
+/**
+ * Create a service request
+ */
+export async function createRequest(
+  token: string,
+  requestData: {
+    title: string;
+    description: string;
+    category: string;
+    location: string;
+    priority: string;
+  }
+) {
+  return fetchWithAuth("/api/requests", token, {
+    method: "POST",
+    body: JSON.stringify(requestData),
+  });
+}
+
+/**
+ * Get request by ID
+ */
+export async function getRequestById(token: string, id: number) {
+  return fetchWithAuth(`/api/requests/${id}`, token);
+}
+
+/**
+ * Update a request
+ */
+export async function updateRequest(
+  token: string,
+  id: number,
+  data: {
+    status?: string;
+    admin_notes?: string;
+    assigned_to?: number;
+    priority?: string;
+  }
+) {
+  return fetchWithAuth(`/api/requests/${id}`, token, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+/**
+ * Get request statistics
+ */
+export async function getRequestStats(token: string) {
+  return fetchWithAuth("/api/requests/stats", token);
+}

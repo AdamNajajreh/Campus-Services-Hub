@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { register } from "@/core/api";
+import { register } from "@/core";
 
 export default function RegisterPage() {
   const router = useRouter();

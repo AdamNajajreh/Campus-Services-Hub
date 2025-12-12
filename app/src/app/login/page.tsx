@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { login } from "@/core/api";
+import { login } from "@/core";
 
 export default function LoginPage() {
   const router = useRouter();

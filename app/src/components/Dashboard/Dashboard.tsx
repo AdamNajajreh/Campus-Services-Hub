@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { TopBar } from "../Common/TopBar";
 import { FiCalendar, FiTool, FiBell } from "react-icons/fi";
-import { getBookings, getRequests, getUnreadCount } from "@/core/api";
+import { getBookings, getRequests, getUnreadCount } from "@/core";
 
 /**
  * @component
