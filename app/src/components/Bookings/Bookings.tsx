@@ -3,10 +3,10 @@ import { TopBar } from "../Common/TopBar";
 
 /**
  * @component
- * @description Dashboard component
- * @returns The Dashboard page layout with top bar and content
+ * @description Bookings component
+ * @returns The Bookings page layout with top bar and content
  */
-export const Dashboard = () => {
+export const Bookings = () => {
   return (
     <div className="bg-white rounded-lg pb-4 shadow">
       <TopBar />
@@ -14,3 +14,4 @@ export const Dashboard = () => {
     </div>
   );
 };
+

@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { IconType } from "react-icons";
-import { FiHome, FiSettings, FiBarChart2 } from "react-icons/fi";
+import { FiHome, FiTool, FiCalendar, FiBell, FiUser, FiBarChart2 } from "react-icons/fi";
 
 const routes = [
   { title: "Dashboard", href: "/dashboard", icon: FiHome },
-  { title: "Analytics", href: "/dashboard/analytics", icon: FiBarChart2 },
-  { title: "Settings", href: "/dashboard/settings", icon: FiSettings },
+  { title: "Service Requests", href: "/dashboard/requests", icon: FiTool },
+  { title: "Room Bookings", href: "/dashboard/bookings", icon: FiCalendar },
+  { title: "Notifications", href: "/dashboard/notifications", icon: FiBell },
+  { title: "Profile", href: "/dashboard/profile", icon: FiUser },
 ];
 
 export const RouteSelect = () => {

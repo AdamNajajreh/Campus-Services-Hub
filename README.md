@@ -88,3 +88,4 @@ The frontend communicates with all microservices through the API Gateway:
 ## Docker Compose
 
 This service will be integrated into the main docker-compose.yml to run alongside all backend microservices.
+

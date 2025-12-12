@@ -1,9 +1,8 @@
-import { Sidebar } from "@/components/Sidebar/Sidebar";
+"use client";
 
-export const metadata = {
-  title: "Dashboard",
-  description: "Dashboard overview",
-};
+import { Sidebar } from "@/components/Sidebar/Sidebar";
+import { AuthGuard } from "@/components/Common/AuthGuard";
+import { Footer } from "@/components/Common/Footer";
 
 export default function DashboardLayout({
   children,
@@ -11,10 +10,14 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <main className="grid gap-4 p-4" style={{ gridTemplateColumns: "220px 1fr" }}>
-      <Sidebar />
-      {children}
-    </main>
+    <AuthGuard>
+      <main className="grid gap-4 p-4 min-h-screen" style={{ gridTemplateColumns: "220px 1fr" }}>
+        <div className="h-[calc(100vh-2rem)]">
+          <Sidebar />
+        </div>
+        {children}
+      </main>
+      <Footer />
+    </AuthGuard>
   );
 }
-
