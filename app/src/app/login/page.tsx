@@ -30,7 +30,13 @@ export default function LoginPage() {
         localStorage.setItem("token", response.data.token);
         localStorage.setItem("user", JSON.stringify(response.data.user));
 
-        window.location.href = "/dashboard";
+        // Redirect based on role
+        const user = response.data.user;
+        if (user.role === "admin" || user.role === "staff") {
+          window.location.href = "/admin";
+        } else {
+          window.location.href = "/dashboard";
+        }
       } else {
         setError("Login failed. Please try again.");
       }

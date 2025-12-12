@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { IconType } from "react-icons";
-import { FiHome, FiTool, FiCalendar, FiBell, FiUser, FiBarChart2 } from "react-icons/fi";
+import { FiHome, FiTool, FiCalendar, FiBell, FiUser, FiBarChart2, FiUsers } from "react-icons/fi";
+import { useEffect, useState } from "react";
 
-const routes = [
+// Student routes
+const studentRoutes = [
   { title: "Dashboard", href: "/dashboard", icon: FiHome },
   { title: "Service Requests", href: "/dashboard/requests", icon: FiTool },
   { title: "Room Bookings", href: "/dashboard/bookings", icon: FiCalendar },
@@ -13,8 +15,35 @@ const routes = [
   { title: "Profile", href: "/dashboard/profile", icon: FiUser },
 ];
 
+// Admin/Staff routes
+const adminRoutes = [
+  { title: "Dashboard", href: "/admin", icon: FiHome },
+  { title: "Manage Requests", href: "/admin/requests", icon: FiTool },
+  { title: "Manage Bookings", href: "/admin/bookings", icon: FiCalendar },
+  { title: "User Management", href: "/admin/users", icon: FiUsers },
+  { title: "Analytics", href: "/admin/analytics", icon: FiBarChart2 },
+];
+
 export const RouteSelect = () => {
   const pathname = usePathname();
+  const [routes, setRoutes] = useState(studentRoutes);
+
+  useEffect(() => {
+    // Check user role and set appropriate routes
+    const userStr = localStorage.getItem("user");
+    if (userStr) {
+      try {
+        const user = JSON.parse(userStr);
+        if (user.role === "admin" || user.role === "staff") {
+          setRoutes(adminRoutes);
+        } else {
+          setRoutes(studentRoutes);
+        }
+      } catch (e) {
+        setRoutes(studentRoutes);
+      }
+    }
+  }, []);
 
   return (
     <div className="space-y-1">
