@@ -33,15 +33,22 @@ export const Sidebar = () => {
 
   return (
     <div className="flex flex-col h-full">
-      {/* User info at top */}
+      {/* User info with logout at top */}
       <div className="mb-4">
-        <div className="flex items-center gap-2 px-2 py-3">
-          <div className="w-8 h-8 rounded-full bg-stone-200 flex items-center justify-center">
-            <FiUser className="text-stone-600" />
-          </div>
-          <div className="flex-1">
+        <div className="flex items-center justify-between gap-2 px-2 py-3">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <div className="w-8 h-8 rounded-full bg-stone-200 flex items-center justify-center flex-shrink-0">
+              <FiUser className="text-stone-600" />
+            </div>
             <p className="text-sm font-medium text-stone-950 truncate">{userName}</p>
           </div>
+          <button
+            onClick={handleLogout}
+            className="p-2 rounded hover:bg-red-50 text-red-600 transition flex-shrink-0"
+            title="Logout"
+          >
+            <FiLogOut className="text-lg" />
+          </button>
         </div>
         {/* Divider line */}
         <div className="border-b border-stone-200"></div>
@@ -50,17 +57,6 @@ export const Sidebar = () => {
       {/* Navigation routes */}
       <div className="flex-1 overflow-y-auto">
         <RouteSelect />
-      </div>
-
-      {/* Logout button at bottom */}
-      <div className="mt-4 pt-4 border-t border-stone-200">
-        <button
-          onClick={handleLogout}
-          className="flex items-center justify-start gap-2 w-full rounded px-2 py-1.5 text-sm transition-[box-shadow,background-color,color] hover:bg-red-100 bg-transparent text-red-600 shadow-none"
-        >
-          <FiLogOut />
-          <span>Logout</span>
-        </button>
       </div>
     </div>
   );
