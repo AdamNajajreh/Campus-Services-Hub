@@ -1,4 +1,4 @@
-import { ServiceRequests } from "@/components/ServiceRequests/ServiceRequests";
+import { Requests } from "@/components/Requests/Requests";
 
 export const metadata = {
   title: "Service Requests",
@@ -6,6 +6,5 @@ export const metadata = {
 };
 
 export default function ServiceRequestsPage() {
-  return <ServiceRequests />;
+  return <Requests />;
 }
-

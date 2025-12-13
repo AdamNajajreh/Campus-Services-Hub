@@ -44,15 +44,28 @@ export async function updateRequest(
   token: string,
   id: number,
   data: {
+    title?: string;
+    description?: string;
+    category?: string;
+    location?: string;
+    priority?: string;
     status?: string;
     admin_notes?: string;
     assigned_to?: number;
-    priority?: string;
   }
 ) {
   return fetchWithAuth(`/api/requests/${id}`, token, {
     method: "PUT",
     body: JSON.stringify(data),
+  });
+}
+
+/**
+ * Delete a request
+ */
+export async function deleteRequest(token: string, id: number) {
+  return fetchWithAuth(`/api/requests/${id}`, token, {
+    method: "DELETE",
   });
 }
 
