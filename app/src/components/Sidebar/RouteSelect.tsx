@@ -23,6 +23,7 @@ const adminRoutes = [
   { title: "Notifications", href: "/admin/notifications", icon: FiBell },
   { title: "User Management", href: "/admin/users", icon: FiUsers },
   { title: "Analytics", href: "/admin/analytics", icon: FiBarChart2 },
+  { title: "Profile", href: "/admin/profile", icon: FiUser },
 ];
 
 export const RouteSelect = () => {

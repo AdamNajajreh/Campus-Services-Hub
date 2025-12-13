@@ -157,16 +157,6 @@ export const Profile = () => {
                   required
                 />
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-stone-700 mb-2">Role</label>
-                <input
-                  type="text"
-                  value={user.role}
-                  disabled
-                  className="w-full px-3 py-2 border border-stone-300 rounded-md bg-stone-100 text-stone-600 cursor-not-allowed"
-                />
-              </div>
             </div>
 
             <button

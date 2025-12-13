@@ -2,12 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { TopBar } from "../Common/TopBar";
-import {
-  getUserNotifications,
-  markNotificationAsRead,
-  markAllNotificationsAsRead,
-  getRecentAnnouncements,
-} from "@/core";
+import { getUserNotifications, markNotificationAsRead, markAllNotificationsAsRead, getAnnouncements } from "@/core";
 import { FiBell, FiCheckCircle, FiAlertCircle, FiInfo } from "react-icons/fi";
 
 interface Notification {
@@ -25,12 +20,13 @@ interface Announcement {
   title: string;
   content: string;
   target_audience: string;
+  created_by: number;
   created_at: string;
 }
 
 /**
  * @component
- * @description Simple Notifications component for students
+ * @description Simple Notifications component for students and admin
  * @returns The Notifications page layout with notifications and announcements
  */
 export const Notifications = () => {
@@ -59,11 +55,15 @@ export const Notifications = () => {
 
       // Fetch all announcements
       const announceResponse = await getAnnouncements(token);
-      if (announceResponse.data && Array.isArray(announceResponse.data)) {
+      if (
+        announceResponse.data &&
+        announceResponse.data.announcements &&
+        Array.isArray(announceResponse.data.announcements)
+      ) {
         // Sort by created_at descending and take latest 10
-        const sortedAnnouncements = announceResponse.data
-          .sort((a: Announcement, b: Announcement) => 
-            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        const sortedAnnouncements = announceResponse.data.announcements
+          .sort(
+            (a: Announcement, b: Announcement) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
           )
           .slice(0, 10);
         setAnnouncements(sortedAnnouncements);
