@@ -16,15 +16,13 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 
--- Insert sample users (only if table is empty)
--- Note: Passwords are bcrypt hashed versions of: admin123, student123, staff123
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM users LIMIT 1) THEN
         INSERT INTO users (email, password, name, role) VALUES
-        ('admin@campus.edu', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NU7P6y5W8Szi', 'Admin User', 'admin'),
-        ('student@campus.edu', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NU7P6y5W8Szi', 'John Student', 'student'),
-        ('staff@campus.edu', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NU7P6y5W8Szi', 'Jane Staff', 'staff');
+        ('admin@campus.edu', '$2a$12$e1eN.zcq8m67iEooJ0QY0ueVbwN.29V3ZMWlz8KAPbjyQivBsKgSq', 'Admin User', 'admin'),
+        ('student@campus.edu', '$2a$12$e1eN.zcq8m67iEooJ0QY0ueVbwN.29V3ZMWlz8KAPbjyQivBsKgSq', 'John Student', 'student'),
+        ('staff@campus.edu', '$2a$12$e1eN.zcq8m67iEooJ0QY0ueVbwN.29V3ZMWlz8KAPbjyQivBsKgSq', 'Jane Staff', 'staff');
     END IF;
 END $$;
 
