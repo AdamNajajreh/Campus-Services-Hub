@@ -650,14 +650,8 @@ def get_announcements():
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         
-        # Build query based on user role and audience
-        query = "SELECT * FROM announcements WHERE 1=1"
-        params = []
-        
-        # Filter by audience (users see announcements for their role + 'all')
-        if audience != 'all':
-            query += " AND target_audience IN (%s, 'all')"
-            params.append(audience)
+        query = "SELECT * FROM announcements WHERE (target_audience = %s OR target_audience = 'all')"
+        params = [user_role]
         
         # Get total count
         count_query = f"SELECT COUNT(*) as total FROM ({query}) as subquery"
