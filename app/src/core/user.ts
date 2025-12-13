@@ -31,3 +31,10 @@ export async function changePassword(token: string, data: { current_password: st
   });
 }
 
+/**
+ * Get all users (Admin only)
+ */
+export async function getAllUsers(token: string) {
+  return fetchWithAuth("/api/users", token);
+}
+

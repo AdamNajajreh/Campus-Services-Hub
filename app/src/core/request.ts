@@ -75,3 +75,25 @@ export async function deleteRequest(token: string, id: number) {
 export async function getRequestStats(token: string) {
   return fetchWithAuth("/api/requests/stats", token);
 }
+
+/**
+ * Get all requests (Admin only - with filters)
+ */
+export async function getAllRequests(token: string, filters?: {
+  status?: string;
+  category?: string;
+  priority?: string;
+}) {
+  let url = "/api/requests";
+  const params = new URLSearchParams();
+  
+  if (filters?.status) params.append("status", filters.status);
+  if (filters?.category) params.append("category", filters.category);
+  if (filters?.priority) params.append("priority", filters.priority);
+  
+  if (params.toString()) {
+    url += `?${params.toString()}`;
+  }
+  
+  return fetchWithAuth(url, token);
+}

@@ -49,3 +49,20 @@ export async function getAnnouncements(token: string) {
 export async function getRecentAnnouncements(token: string) {
   return fetchWithAuth("/api/announcements/recent", token);
 }
+
+/**
+ * Create announcement (Admin/Staff only)
+ */
+export async function createAnnouncement(
+  token: string,
+  data: {
+    title: string;
+    content: string;
+    target_audience?: string;
+  }
+) {
+  return fetchWithAuth("/api/announcements", token, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
