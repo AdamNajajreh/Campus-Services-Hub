@@ -66,3 +66,10 @@ export async function createAnnouncement(
     body: JSON.stringify(data),
   });
 }
+
+/**
+ * Get notification statistics (Staff/Admin only)
+ */
+export async function getNotificationStats(token: string) {
+  return fetchWithAuth("/api/notifications/stats", token);
+}
