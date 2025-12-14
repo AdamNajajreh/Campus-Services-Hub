@@ -4,8 +4,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata = {
-  title: "Next.js App Template",
-  description: "A clean, reusable Next.js application template",
+  title: "Campus Services Hub",
+  description: "Campus Services Hub",
 };
 
 export default function RootLayout({
@@ -15,10 +15,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${inter.className} text-stone-950 bg-stone-100`}>
-        {children}
-      </body>
+      <body className={`${inter.className} text-stone-950 bg-stone-100`}>{children}</body>
     </html>
   );
 }
-
